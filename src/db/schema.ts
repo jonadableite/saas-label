@@ -1,13 +1,6 @@
 // src/db/schema.ts
 import { relations } from "drizzle-orm";
-import {
-  boolean,
-  index,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 // Definição da tabela de usuários
@@ -38,33 +31,34 @@ export const usersRelations = relations(usersTables, ({ many }) => ({
 }));
 
 // Tabela de instâncias da Evolution API
-export const instancesTables = pgTable("instances_tables", {
-  instanceId: uuid("instance_id").primaryKey().notNull(),
-  // Chave estrangeira vinculando a instância ao usuário que a criou
-  userId: text("user_id")
-    .notNull()
-    .references(() => usersTables.id, { onDelete: "cascade" }), // Deleta instâncias associadas se o usuário for deletado
-
-  instanceName: text("instance_name").notNull(),
-  token: text("token").notNull(),
-  number: text("number"),
-  integration: text("integration").notNull().default("WHATSAPP-BAILEYS"),
-  status: text("status"), // Status da conexão da instância (e.g., 'open', 'connecting', 'close')
-  ownerJid: text("owner_jid"),
-  profileName: text("profile_name"),
-  profilePicUrl: text("profile_pic_url"),
-  qrcode: boolean("qrcode").default(true),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-}, (instances) => { // <--- Definindo índice dentro das opções da tabela
-  return {
-    userIdIdx: index("user_id_idx").on(instances.userId),
-  };
-});
+export const instancesTables = pgTable(
+  "instances_tables",
+  {
+    instanceId: text("instance_id").primaryKey().notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTables.id, { onDelete: "cascade" }),
+    instanceName: text("instance_name").notNull(),
+    number: text("number"),
+    integration: text("integration").notNull().default("WHATSAPP-BAILEYS"),
+    status: text("status"), // Status da conexão da instância (e.g., 'open', 'connecting', 'close')
+    ownerJid: text("owner_jid"),
+    profileName: text("profile_name"),
+    profilePicUrl: text("profile_pic_url"),
+    qrcode: boolean("qrcode").default(true),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (instances) => {
+    return {
+      userIdIdx: index("user_id_idx").on(instances.userId),
+    };
+  },
+);
 
 // Relações para a tabela de instâncias
 export const instancesRelations = relations(instancesTables, ({ one }) => ({
