@@ -1,4 +1,4 @@
-// src/app/(protected)/whatsapp/components/create-instance-form.tsx
+//src/app/(protected)/whatsapp/components/create-instance-form.tsx
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { createInstance } from "@/actions/instance/create-instance";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -17,8 +18,6 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { CreateInstanceSchema } from "@/db/schema";
-
-import { createInstance } from "../actions";
 
 interface CreateInstanceFormProps {
   onClose: () => void;
@@ -33,7 +32,6 @@ export function CreateInstanceForm({ onClose }: CreateInstanceFormProps) {
   });
 
   async function onSubmit(values: z.infer<typeof CreateInstanceSchema>) {
-    // Chama a Server Action para criar a instância
     const result = await createInstance(values);
 
     if (result.error) {

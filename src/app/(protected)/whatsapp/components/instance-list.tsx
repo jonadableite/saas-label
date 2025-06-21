@@ -17,17 +17,22 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react"; // Importe useRef
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  deleteInstance,
+  getInstanceQrCode,
+  getInstanceStatus,
+  logoutInstance,
+  restartInstance,
+} from "@/actions/instance";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { instancesTables } from "@/db/schema";
 import { cn } from "@/lib/utils";
-
-import { getInstanceStatus } from "../actions";
 
 export type Instance = typeof instancesTables.$inferSelect;
 
@@ -42,7 +47,7 @@ const StatusIcon = ({ status }: { status: string | null }) => {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     case "connecting":
     case "qrcode":
-    case "start": // Adicionado 'start' como estado de conexão/QR
+    case "start":
       return <Clock className="h-4 w-4 animate-pulse text-yellow-500" />;
     case "close":
     case "offline":
@@ -55,7 +60,7 @@ const StatusIcon = ({ status }: { status: string | null }) => {
 const getStatusText = (status: string | null) => {
   switch (status) {
     case "open":
-    case "online": // Adicionado 'online'
+    case "online":
       return "Conectado";
     case "connecting":
     case "start":
@@ -63,7 +68,7 @@ const getStatusText = (status: string | null) => {
     case "qrcode":
       return "Aguardando QR";
     case "close":
-    case "offline": // Adicionado 'offline'
+    case "offline":
       return "Desconectado";
     case "unknown":
       return "Desconhecido";
@@ -75,6 +80,7 @@ const getStatusText = (status: string | null) => {
 const ProfileAvatar = ({ instance }: { instance: Instance }) => {
   const isOnline = instance.status === "open" || instance.status === "online";
   const profileImageUrl = instance.profilePicUrl;
+
   return (
     <div className="relative">
       <Avatar className="h-12 w-12 border-2 border-white shadow-md md:h-16 md:w-16 dark:border-[#091E3B]">
@@ -110,71 +116,124 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
   );
   const [search, setSearch] = useState("");
 
-  // Use useRef para armazenar a versão mais recente do estado 'instances'
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [currentQrCodeData, setCurrentQrCodeData] = useState<{
+    qrCode?: string;
+    pairingCode?: string;
+  } | null>(null);
+  const [loadingQrCode, setLoadingQrCode] = useState(false);
+
   const instancesRef = useRef(instances);
 
-  // Efeito para manter a ref atualizada sempre que o estado 'instances' mudar
   useEffect(() => {
     instancesRef.current = instances;
-  }, [instances]); // Este efeito roda sempre que 'instances' muda
+    console.log("[instancesRef] instances state updated:", instances);
+  }, [instances]);
 
   const fetchStatus = useCallback(async (instanceName: string) => {
+    console.log(
+      `[fetchStatus] Attempting to fetch status for: ${instanceName}`,
+    );
     setLoadingStatus((prev) => ({ ...prev, [instanceName]: true }));
-    const result = await getInstanceStatus(instanceName);
+    const result = await getInstanceStatus({ instanceName });
+    console.log(`[fetchStatus] Received result for ${instanceName}:`, result);
     setLoadingStatus((prev) => ({ ...prev, [instanceName]: false }));
 
-    // Use a atualização funcional do estado para garantir que você está trabalhando com o estado mais recente
     setInstances((prev) =>
       prev.map((inst) => {
         if (inst.instanceName === instanceName) {
-          // Atualiza o status apenas se a chamada foi bem-sucedida e retornou um status
-          if (result.success && result.status !== undefined) {
+          if (
+            "success" in result &&
+            result.success &&
+            "status" in result &&
+            result.status !== undefined
+          ) {
+            console.log(
+              `[fetchStatus] Updating state for ${instanceName} to status: ${result.status}`,
+            );
             return { ...inst, status: result.status };
-          } else if (result.error) {
-            // Define como 'unknown' ou mantém o status anterior em caso de erro
+          } else if ("error" in result && result.error) {
+            console.error(
+              `[fetchStatus] Error for ${instanceName}: ${result.error}`,
+            );
             toast.error(
               `Erro ao obter status de ${instanceName}: ${result.error}`,
             );
-            return { ...inst, status: inst.status || "unknown" }; // Mantém o status anterior ou define como unknown
+            const newStatusOnError = inst.status || "unknown";
+            console.log(
+              `[fetchStatus] Setting state for ${instanceName} to status on error: ${newStatusOnError}`,
+            );
+            return { ...inst, status: newStatusOnError };
           }
         }
         return inst;
       }),
     );
-  }, []); // fetchStatus não depende de 'instances' ou 'setInstances' diretamente graças à atualização funcional e useCallback
+  }, []);
 
-  // Efeito para a busca inicial e configuração do intervalo
+  const handleOpenQrModal = useCallback(async (instanceName: string) => {
+    setLoadingQrCode(true);
+    setIsQrModalOpen(true);
+    setCurrentQrCodeData(null);
+
+    const result = await getInstanceQrCode({ instanceName });
+
+    if (result.success) {
+      setCurrentQrCodeData({
+        qrCode: result.qrCode,
+        pairingCode: result.pairingCode,
+      });
+    } else {
+      toast.error(result.error || "Erro ao carregar QR Code.");
+      setIsQrModalOpen(false);
+    }
+    setLoadingQrCode(false);
+  }, []);
+
+  const handleCloseQrModal = useCallback(() => {
+    setIsQrModalOpen(false);
+    setCurrentQrCodeData(null);
+  }, []);
+
   useEffect(() => {
-    // Busca inicial de status para todas as instâncias fornecidas
+    console.log("[useEffect] Component mounted or initialInstances changed.");
+
     initialInstances.forEach((instance) => {
-      // Opcional: Você pode adicionar uma condição aqui se não quiser buscar o status
-      // de instâncias que já vêm com um status final conhecido do servidor.
-      // Por exemplo: if (instance.status !== "open" && instance.status !== "close") { ... }
-      // No entanto, buscar o status de todos inicialmente garante que você tem o status mais recente.
+      console.log(`[useEffect] Initial fetch for: ${instance.instanceName}`);
       fetchStatus(instance.instanceName);
     });
 
-    // Configura o intervalo para verificar o status periodicamente
     const intervalId = setInterval(() => {
-      // Use a ref para acessar a lista de instâncias mais recente dentro do intervalo
+      console.log("[useEffect] Interval triggered. Checking instances...");
+
       instancesRef.current.forEach((instance) => {
-        // Verifica o status apenas para instâncias que não estão em estado final
-        // Adicionei 'unknown' para garantir que instâncias com erro também sejam re-verificadas
+        console.log(
+          `[useEffect] Checking instance ${instance.instanceName}, current status: ${instance.status}`,
+        );
+
         if (
-          instance.status !== "open" &&
-          instance.status !== "close" &&
-          instance.status !== "unknown" &&
-          instance.status !== "offline"
+          instance.status === "connecting" ||
+          instance.status === "qrcode" ||
+          instance.status === "start" ||
+          instance.status === "unknown"
         ) {
+          console.log(
+            `[useEffect] Status is '${instance.status}'. Fetching status for ${instance.instanceName}.`,
+          );
           fetchStatus(instance.instanceName);
+        } else {
+          console.log(
+            `[useEffect] Status is '${instance.status}'. Skipping status fetch for ${instance.instanceName}.`,
+          );
         }
       });
-    }, 30000); // Verifica a cada 30 segundos
+    }, 90000);
 
-    // Função de limpeza: limpa o intervalo quando o componente desmonta ou as dependências mudam
-    return () => clearInterval(intervalId);
-  }, [initialInstances, fetchStatus]); // Dependências: initialInstances (se mudar) e fetchStatus (estável via useCallback)
-  // Removendo 'instances' daqui, o intervalo não será reiniciado a cada atualização de status.
+    return () => {
+      console.log("[useEffect] Cleaning up interval.");
+      clearInterval(intervalId);
+    };
+  }, [initialInstances, fetchStatus]);
 
   const filteredInstances = instances.filter(
     (instance) =>
@@ -213,49 +272,33 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
               <motion.div
                 key={instance.instanceId}
                 layout
-                initial={{ opacity: 0, y: 50, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                transition={{ duration: 0.3 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+                className="col-span-1 flex"
               >
-                <Card className="flex h-full flex-col">
-                  <CardHeader className="flex flex-wrap items-center justify-between gap-2 space-y-0 pb-2">
-                    <div className="flex min-w-0 items-center gap-4">
+                <Card className="flex w-full flex-col">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <div className="flex items-center gap-3">
                       <ProfileAvatar instance={instance} />
-                      <div className="min-w-0">
-                        <CardTitle className="truncate text-lg font-semibold">
-                          {instance.profileName || instance.instanceName}
+                      <div>
+                        <CardTitle className="text-lg font-semibold">
+                          {instance.instanceName}
                         </CardTitle>
-                        {instance.profileName &&
-                          instance.profileName !== instance.instanceName && (
-                            <p className="text-muted-foreground truncate text-sm">
-                              {instance.instanceName}
-                            </p>
-                          )}
+                        {instance.profileName && (
+                          <p className="text-muted-foreground text-sm">
+                            {instance.profileName}
+                          </p>
+                        )}
                       </div>
                     </div>
-                    {/* Indicador de Status */}
-                    <div
-                      className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
-                        instance.status === "open" ||
-                        instance.status === "online"
-                          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                          : instance.status === "connecting" ||
-                              instance.status === "qrcode" ||
-                              instance.status === "start"
-                            ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                            : instance.status === "close" ||
-                                instance.status === "offline"
-                              ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                              : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
-                      }`}
-                    >
+                    <div className="flex items-center gap-1 text-sm">
                       <StatusIcon status={instance.status} />
                       {getStatusText(instance.status)}
                     </div>
                   </CardHeader>
                   <CardContent className="text-muted-foreground flex-grow space-y-2 pt-4 text-sm">
-                    {/* Detalhes da Instância */}
                     {instance.ownerJid && (
                       <p>
                         Número:{" "}
@@ -284,6 +327,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                         )}
                         <span className="sr-only">Atualizar Status</span>
                       </Button>
+                      {/* Ver QR Code */}
                       {(instance.status === "qrcode" ||
                         instance.status === "connecting" ||
                         instance.status === "start") && (
@@ -292,6 +336,9 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                           size="icon"
                           title="Ver QR Code"
                           className="shrink-0"
+                          onClick={() =>
+                            handleOpenQrModal(instance.instanceName)
+                          }
                         >
                           <QrCode className="h-4 w-4" />
                           <span className="sr-only">Ver QR Code</span>
@@ -303,6 +350,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                           size="icon"
                           title="Configurações da Instância"
                           className="shrink-0"
+                          // TODO: Add onClick handler for settings
                         >
                           <Settings className="h-4 w-4" />
                           <span className="sr-only">
@@ -310,35 +358,68 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                           </span>
                         </Button>
                       )}
+
                       {instance.status === "open" && (
                         <Button
                           variant="outline"
                           size="icon"
                           title="Gerenciar Agentes AI"
                           className="shrink-0"
+                          // TODO: Add onClick handler for AI agents
                         >
                           <Bot className="h-4 w-4" />
                           <span className="sr-only">Gerenciar Agentes AI</span>
                         </Button>
                       )}
+
                       {instance.status !== "close" &&
                         instance.status !== "offline" && (
                           <Button
                             variant="outline"
                             size="icon"
-                            title="Desconectar"
+                            title="Reiniciar Instância (Desconectar)"
                             className="shrink-0"
+                            onClick={async () => {
+                              const result = await restartInstance({
+                                instanceName: instance.instanceName,
+                              });
+                              if (result.success) {
+                                toast.success(result.success);
+
+                                fetchStatus(instance.instanceName);
+                              } else {
+                                toast.error(
+                                  result.error ||
+                                    "Erro ao reiniciar instância.",
+                                );
+                              }
+                            }}
                           >
                             <PowerOff className="h-4 w-4 text-yellow-600" />
-                            <span className="sr-only">Desconectar</span>
+                            <span className="sr-only">Reiniciar Instância</span>
                           </Button>
                         )}
+
                       {instance.status === "open" && (
                         <Button
                           variant="outline"
                           size="icon"
                           title="Logout (Limpar Sessão)"
                           className="shrink-0"
+                          onClick={async () => {
+                            const result = await logoutInstance({
+                              instanceName: instance.instanceName,
+                            });
+                            if (result.success) {
+                              toast.success(result.success);
+
+                              fetchStatus(instance.instanceName);
+                            } else {
+                              toast.error(
+                                result.error || "Erro ao fazer logout.",
+                              );
+                            }
+                          }}
                         >
                           <LogOut className="h-4 w-4 text-orange-600" />
                           <span className="sr-only">
@@ -346,11 +427,31 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                           </span>
                         </Button>
                       )}
+                      {/* Botão Deletar Instância */}
                       <Button
                         variant="outline"
                         size="icon"
                         title="Deletar Instância"
                         className="shrink-0"
+                        onClick={async () => {
+                          const result = await deleteInstance({
+                            instanceName: instance.instanceName,
+                          });
+                          if (result.success) {
+                            toast.success(result.success);
+
+                            setInstances((prev) =>
+                              prev.filter(
+                                (inst) =>
+                                  inst.instanceName !== instance.instanceName,
+                              ),
+                            );
+                          } else {
+                            toast.error(
+                              result.error || "Erro ao deletar instância.",
+                            );
+                          }
+                        }}
                       >
                         <Trash2 className="h-4 w-4 text-red-600" />
                         <span className="sr-only">Deletar Instância</span>
@@ -363,6 +464,67 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Modal do QR Code */}
+      {isQrModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={handleCloseQrModal} // Fecha o modal ao clicar fora
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.2 }}
+            className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-[#091E3B]"
+            onClick={(e) => e.stopPropagation()} // Previne que o clique dentro feche o modal
+          >
+            <h2 className="mb-4 text-center text-2xl font-bold text-gray-800 dark:text-white">
+              Conectar Instância
+            </h2>
+            <div className="flex flex-col items-center justify-center space-y-4">
+              {loadingQrCode ? (
+                <div className="flex flex-col items-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    Carregando QR Code...
+                  </p>
+                </div>
+              ) : currentQrCodeData?.qrCode ? (
+                <>
+                  <img
+                    src={`data:image/png;base64,${currentQrCodeData.qrCode}`}
+                    alt="QR Code"
+                    className="h-48 w-48 object-contain"
+                  />
+                  <p className="text-muted-foreground mt-2 text-center text-sm">
+                    Escaneie com o WhatsApp no seu celular.
+                  </p>
+                </>
+              ) : currentQrCodeData?.pairingCode ? (
+                <>
+                  <p className="text-center text-lg font-semibold">
+                    Código de Pareamento:
+                  </p>
+                  <p className="mt-2 text-center text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {currentQrCodeData.pairingCode}
+                  </p>
+                  <p className="text-muted-foreground mt-4 text-center text-sm">
+                    Use este código para conectar seu celular.
+                  </p>
+                </>
+              ) : (
+                <p className="text-center text-red-500">
+                  Não foi possível carregar o QR Code ou código de pareamento.
+                </p>
+              )}
+            </div>
+            <Button onClick={handleCloseQrModal} className="mt-6 w-full">
+              Fechar
+            </Button>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
