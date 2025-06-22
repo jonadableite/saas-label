@@ -36,6 +36,8 @@ import { Input } from "@/components/ui/input";
 import { instancesTables } from "@/db/schema";
 import { cn } from "@/lib/utils";
 
+import { InstanceSettingsModal } from "./instance-settings-modal";
+
 export type Instance = typeof instancesTables.$inferSelect;
 
 interface InstanceListProps {
@@ -185,6 +187,15 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
   } | null>(null);
   const [loadingQrCode, setLoadingQrCode] = useState(false);
 
+  // Estado para o modal de configurações
+  const [settingsModal, setSettingsModal] = useState<{
+    isOpen: boolean;
+    instanceName: string;
+  }>({
+    isOpen: false,
+    instanceName: "",
+  });
+
   const instancesRef = useRef(instances);
 
   useEffect(() => {
@@ -235,6 +246,21 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
     setCurrentQrCodeData(null);
   }, []);
 
+  // Funções para o modal de configurações
+  const handleOpenSettings = useCallback((instanceName: string) => {
+    setSettingsModal({
+      isOpen: true,
+      instanceName,
+    });
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsModal({
+      isOpen: false,
+      instanceName: "",
+    });
+  }, []);
+
   useEffect(() => {
     if (!hasInitialized && initialInstances.length > 0) {
       setHasInitialized(true);
@@ -259,12 +285,11 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
     }, 90000);
 
     return () => clearInterval(intervalId);
-  }, []);
+  }, [fetchCompleteInstanceDetails]);
 
   const filteredInstances = instances.filter(
     (instance) =>
       instance.instanceName.toLowerCase().includes(search.toLowerCase()) ||
-      instance.number?.toLowerCase().includes(search.toLowerCase()) ||
       instance.profileName?.toLowerCase().includes(search.toLowerCase()) ||
       (instance.ownerJid &&
         instance.ownerJid
@@ -390,7 +415,11 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
 
                       {instance.status === "open" && (
                         <>
-                          <ActionButton title="Configurações" variant="secondary">
+                          <ActionButton
+                            onClick={() => handleOpenSettings(instance.instanceName)}
+                            title="Configurações"
+                            variant="secondary"
+                          >
                             <Settings className="h-4 w-4" />
                           </ActionButton>
 
@@ -543,6 +572,13 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Configurações */}
+      <InstanceSettingsModal
+        instanceName={settingsModal.instanceName}
+        isOpen={settingsModal.isOpen}
+        onClose={handleCloseSettings}
+      />
     </div>
   );
 }

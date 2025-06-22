@@ -39,7 +39,6 @@ export const instancesTables = pgTable(
       .notNull()
       .references(() => usersTables.id, { onDelete: "cascade" }),
     instanceName: text("instance_name").notNull(),
-    number: text("number"),
     integration: text("integration").notNull().default("WHATSAPP-BAILEYS"),
     status: text("status"), // Status da conexão da instância (e.g., 'open', 'connecting', 'close')
     ownerJid: text("owner_jid"),
