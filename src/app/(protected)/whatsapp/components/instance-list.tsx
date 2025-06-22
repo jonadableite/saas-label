@@ -22,8 +22,8 @@ import { toast } from "sonner";
 
 import {
   deleteInstance,
+  fetchInstanceDetails,
   getInstanceQrCode,
-  getInstanceStatus,
   logoutInstance,
   restartInstance,
 } from "@/actions/instance";
@@ -130,46 +130,44 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
     console.log("[instancesRef] instances state updated:", instances);
   }, [instances]);
 
-  const fetchStatus = useCallback(async (instanceName: string) => {
-    console.log(
-      `[fetchStatus] Attempting to fetch status for: ${instanceName}`,
-    );
-    setLoadingStatus((prev) => ({ ...prev, [instanceName]: true }));
-    const result = await getInstanceStatus({ instanceName });
-    console.log(`[fetchStatus] Received result for ${instanceName}:`, result);
-    setLoadingStatus((prev) => ({ ...prev, [instanceName]: false }));
+  const fetchCompleteInstanceDetails = useCallback(
+    async (instanceName: string) => {
+      console.log(
+        `[fetchCompleteInstanceDetails] Attempting to fetch details for: ${instanceName}`,
+      );
+      setLoadingStatus((prev) => ({ ...prev, [instanceName]: true }));
+      const result = await fetchInstanceDetails({ instanceName });
+      console.log(
+        `[fetchCompleteInstanceDetails] Received result for ${instanceName}:`,
+        result,
+      );
+      setLoadingStatus((prev) => ({ ...prev, [instanceName]: false }));
 
-    setInstances((prev) =>
-      prev.map((inst) => {
-        if (inst.instanceName === instanceName) {
-          if (
-            "success" in result &&
-            result.success &&
-            "status" in result &&
-            result.status !== undefined
-          ) {
-            console.log(
-              `[fetchStatus] Updating state for ${instanceName} to status: ${result.status}`,
-            );
-            return { ...inst, status: result.status };
-          } else if ("error" in result && result.error) {
-            console.error(
-              `[fetchStatus] Error for ${instanceName}: ${result.error}`,
-            );
-            toast.error(
-              `Erro ao obter status de ${instanceName}: ${result.error}`,
-            );
-            const newStatusOnError = inst.status || "unknown";
-            console.log(
-              `[fetchStatus] Setting state for ${instanceName} to status on error: ${newStatusOnError}`,
-            );
-            return { ...inst, status: newStatusOnError };
+      setInstances((prev) =>
+        prev.map((inst) => {
+          if (inst.instanceName === instanceName) {
+            if ("success" in result && result.success && result.instance) {
+              console.log(
+                `[fetchCompleteInstanceDetails] Updating state for ${instanceName} with complete data:`,
+                result.instance,
+              );
+              return result.instance;
+            } else if ("error" in result && result.error) {
+              console.error(
+                `[fetchCompleteInstanceDetails] Error for ${instanceName}: ${result.error}`,
+              );
+              toast.error(
+                `Erro ao obter detalhes de ${instanceName}: ${result.error}`,
+              );
+              return inst;
+            }
           }
-        }
-        return inst;
-      }),
-    );
-  }, []);
+          return inst;
+        }),
+      );
+    },
+    [],
+  );
 
   const handleOpenQrModal = useCallback(async (instanceName: string) => {
     setLoadingQrCode(true);
@@ -198,9 +196,10 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
   useEffect(() => {
     console.log("[useEffect] Component mounted or initialInstances changed.");
 
+    // Busca inicial dos detalhes completos para todas as instâncias
     initialInstances.forEach((instance) => {
       console.log(`[useEffect] Initial fetch for: ${instance.instanceName}`);
-      fetchStatus(instance.instanceName);
+      fetchCompleteInstanceDetails(instance.instanceName);
     });
 
     const intervalId = setInterval(() => {
@@ -211,35 +210,41 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
           `[useEffect] Checking instance ${instance.instanceName}, current status: ${instance.status}`,
         );
 
+        // Busca detalhes completos para instâncias conectadas e instâncias com status transitório
         if (
           instance.status === "connecting" ||
           instance.status === "qrcode" ||
           instance.status === "start" ||
-          instance.status === "unknown"
+          instance.status === "unknown" ||
+          instance.status === "open"
         ) {
           console.log(
-            `[useEffect] Status is '${instance.status}'. Fetching status for ${instance.instanceName}.`,
+            `[useEffect] Status is '${instance.status}'. Fetching complete details for ${instance.instanceName}.`,
           );
-          fetchStatus(instance.instanceName);
+          fetchCompleteInstanceDetails(instance.instanceName);
         } else {
           console.log(
-            `[useEffect] Status is '${instance.status}'. Skipping status fetch for ${instance.instanceName}.`,
+            `[useEffect] Status is '${instance.status}'. Skipping fetch for ${instance.instanceName}.`,
           );
         }
       });
-    }, 90000);
+    }, 90000); // Busca detalhes completos a cada 90 segundos
 
     return () => {
       console.log("[useEffect] Cleaning up interval.");
       clearInterval(intervalId);
     };
-  }, [initialInstances, fetchStatus]);
+  }, [initialInstances, fetchCompleteInstanceDetails]);
 
   const filteredInstances = instances.filter(
     (instance) =>
       instance.instanceName.toLowerCase().includes(search.toLowerCase()) ||
       instance.number?.toLowerCase().includes(search.toLowerCase()) ||
-      instance.profileName?.toLowerCase().includes(search.toLowerCase()),
+      instance.profileName?.toLowerCase().includes(search.toLowerCase()) ||
+      (instance.ownerJid &&
+        instance.ownerJid
+          .replace("@s.whatsapp.net", "")
+          .includes(search.toLowerCase())),
   );
 
   return (
@@ -286,6 +291,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                         <CardTitle className="text-lg font-semibold">
                           {instance.instanceName}
                         </CardTitle>
+                        {/* Display profile name if available */}
                         {instance.profileName && (
                           <p className="text-muted-foreground text-sm">
                             {instance.profileName}
@@ -299,11 +305,12 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                     </div>
                   </CardHeader>
                   <CardContent className="text-muted-foreground flex-grow space-y-2 pt-4 text-sm">
+                    {/* Display formatted ownerJid (WhatsApp number) */}
                     {instance.ownerJid && (
                       <p>
                         Número:{" "}
                         <span className="font-mono break-all">
-                          {instance.ownerJid}
+                          {instance.ownerJid.replace("@s.whatsapp.net", "")}
                         </span>{" "}
                       </p>
                     )}
@@ -315,8 +322,10 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                       <Button
                         variant="outline"
                         size="icon"
-                        title="Atualizar Status"
-                        onClick={() => fetchStatus(instance.instanceName)}
+                        title="Atualizar Detalhes"
+                        onClick={() =>
+                          fetchCompleteInstanceDetails(instance.instanceName)
+                        } // USA NOVA FUNÇÃO
                         disabled={loadingStatus[instance.instanceName]}
                         className="shrink-0"
                       >
@@ -325,7 +334,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                         ) : (
                           <RefreshCcw className="h-4 w-4" />
                         )}
-                        <span className="sr-only">Atualizar Status</span>
+                        <span className="sr-only">Atualizar Detalhes</span>
                       </Button>
                       {/* Ver QR Code */}
                       {(instance.status === "qrcode" ||
@@ -385,8 +394,9 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                               });
                               if (result.success) {
                                 toast.success(result.success);
-
-                                fetchStatus(instance.instanceName);
+                                fetchCompleteInstanceDetails(
+                                  instance.instanceName,
+                                );
                               } else {
                                 toast.error(
                                   result.error ||
@@ -412,8 +422,9 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
                             });
                             if (result.success) {
                               toast.success(result.success);
-
-                              fetchStatus(instance.instanceName);
+                              fetchCompleteInstanceDetails(
+                                instance.instanceName,
+                              );
                             } else {
                               toast.error(
                                 result.error || "Erro ao fazer logout.",
@@ -469,7 +480,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
       {isQrModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={handleCloseQrModal} // Fecha o modal ao clicar fora
+          onClick={handleCloseQrModal}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
@@ -477,7 +488,7 @@ export function InstanceList({ initialInstances }: InstanceListProps) {
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.2 }}
             className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-[#091E3B]"
-            onClick={(e) => e.stopPropagation()} // Previne que o clique dentro feche o modal
+            onClick={(e) => e.stopPropagation()}
           >
             <h2 className="mb-4 text-center text-2xl font-bold text-gray-800 dark:text-white">
               Conectar Instância
