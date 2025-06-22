@@ -1,147 +1,172 @@
 // src/app/(protected)/_components/app-sidebar.tsx
-"use client";
+"use client"
 
 import {
   Bot,
-  Gem,
   LayoutDashboard,
-  LogOut,
-  MessageSquareText
-} from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { FaWhatsapp } from "react-icons/fa";
+  MessageSquareText,
+  Settings2
+} from "lucide-react"
+import { useRouter } from "next/navigation"
+import * as React from "react"
+import { FaWhatsapp } from "react-icons/fa"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { NavMain } from "@/components/nav-main"
+import { NavUser } from "@/components/nav-user"
+import { TeamSwitcher } from "@/components/team-switcher"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
-import { authClient } from "@/lib/auth-client";
+  SidebarRail,
+} from "@/components/ui/sidebar"
+import { authClient } from "@/lib/auth-client"
 
-const items = [
-  {
-    title: "Dashboard",
-    url: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    title: "Disparos",
-    url: "/disparos",
-    icon: MessageSquareText,
-  },
-  {
-    title: "Agentes IA",
-    url: "/agentes",
-    icon: Bot,
-  },
-  {
-    title: "WhatsApp",
-    url: "/whatsapp",
-    icon: FaWhatsapp,
-  },
-];
-
-export function AppSidebar() {
-  const router = useRouter();
-  const session = authClient.useSession();
-  const pathname = usePathname();
+export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const router = useRouter()
+  const session = authClient.useSession()
 
   const handleSignOut = async () => {
     await authClient.signOut({
       fetchOptions: {
         onSuccess: () => {
-          router.push("/authentication");
+          router.push("/authentication")
         },
       },
-    });
-  };
+    })
+  }
+
+  // Dados da organização/empresa
+  const teams = [
+    {
+      name: session.data?.user?.clinic?.name || "Minha Empresa",
+      logo: "/logo.svg",
+      plan: "Professional",
+    },
+  ]
+
+  // Navegação principal
+  const navMain = [
+    {
+      title: "Dashboard",
+      url: "/dashboard",
+      icon: LayoutDashboard,
+      items: [
+        {
+          title: "Visão Geral",
+          url: "/dashboard",
+        },
+        {
+          title: "Analytics",
+          url: "/dashboard/analytics",
+        },
+        {
+          title: "Relatórios",
+          url: "/dashboard/reports",
+        },
+      ],
+    },
+    {
+      title: "WhatsApp",
+      url: "/whatsapp",
+      icon: FaWhatsapp,
+      items: [
+        {
+          title: "Instâncias",
+          url: "/whatsapp",
+        },
+        {
+          title: "Contatos",
+          url: "/whatsapp/contacts",
+        },
+      ],
+    },
+    {
+      title: "Campanhas",
+      url: "/campaigns",
+      icon: MessageSquareText,
+      items: [
+        {
+          title: "Todas as Campanhas",
+          url: "/campaigns",
+        },
+        {
+          title: "Agendadas",
+          url: "/campaigns/scheduled",
+        },
+        {
+          title: "Templates",
+          url: "/campaigns/templates",
+        },
+      ],
+    },
+    {
+      title: "Agentes IA",
+      url: "/agents",
+      icon: Bot,
+      items: [
+        {
+          title: "Meus Agentes",
+          url: "/agents",
+        },
+        {
+          title: "Criar Agente",
+          url: "/agents/create",
+        },
+        {
+          title: "chat",
+          url: "/agents/chat",
+        },
+      ],
+    },
+
+    {
+      title: "Configurações",
+      url: "/settings",
+      icon: Settings2,
+      items: [
+        {
+          title: "Geral",
+          url: "/settings",
+        },
+        {
+          title: "Integrações",
+          url: "/settings/integrations",
+        },
+        {
+          title: "API",
+          url: "/settings/api",
+        },
+        {
+          title: "Webhooks",
+          url: "/settings/webhooks",
+        },
+      ],
+    },
+  ]
+
+
+
+  const userData = {
+    name: session.data?.user?.name || session.data?.user?.name || "Usuário",
+    email: session.data?.user?.email || "",
+    avatar: session.data?.user?.image || "",
+  }
+
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b p-4">
-        <Image src="/logo.svg" alt="Sua Plataforma" width={136} height={28} />
+    <Sidebar collapsible="icon" {...props}>
+      <SidebarHeader>
+        <TeamSwitcher teams={teams} />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Menu Principal</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {items.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={pathname === item.url}>
-                    <Link href={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Outros</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={pathname === "/subscription"}
-                >
-                  <Link href="/subscription">
-                    <Gem />
-                    <span>Assinatura</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <NavMain items={navMain} />
+
       </SidebarContent>
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton size="lg">
-                  <Avatar>
-                    <AvatarFallback>F</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm">
-                      {session.data?.user?.clinic?.name}
-                    </p>
-                    <p className="text-muted-foreground text-sm">
-                      {session.data?.user.email}
-                    </p>
-                  </div>
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut />
-                  Sair
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <NavUser user={userData} onSignOut={handleSignOut} />
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
-  );
+  )
 }

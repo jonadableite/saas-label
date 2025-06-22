@@ -2,7 +2,6 @@
 "use server";
 
 import { eq } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -89,7 +88,6 @@ export async function fetchInstanceDetails(input: FetchInstanceDetailsInput) {
         .update(instancesTables)
         .set({ status: "unknown", updatedAt: new Date() })
         .where(eq(instancesTables.instanceId, instance.instanceId));
-      revalidatePath("/whatsapp");
 
       return {
         error: errorData.message || "Erro ao buscar detalhes da instância.",
@@ -142,8 +140,6 @@ export async function fetchInstanceDetails(input: FetchInstanceDetailsInput) {
       .where(eq(instancesTables.instanceId, instance.instanceId))
       .returning();
 
-    revalidatePath("/whatsapp");
-
     const returnObject = {
       success: true,
       instance: updatedInstance,
@@ -163,7 +159,6 @@ export async function fetchInstanceDetails(input: FetchInstanceDetailsInput) {
       .update(instancesTables)
       .set({ status: "unknown", updatedAt: new Date() })
       .where(eq(instancesTables.instanceId, instance.instanceId));
-    revalidatePath("/whatsapp");
     return { error: "Ocorreu um erro inesperado ao buscar os detalhes." };
   }
 }
