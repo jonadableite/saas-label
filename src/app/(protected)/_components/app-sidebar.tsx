@@ -52,20 +52,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       title: "Dashboard",
       url: "/dashboard",
       icon: LayoutDashboard,
-      items: [
-        {
-          title: "Visão Geral",
-          url: "/dashboard",
-        },
-        {
-          title: "Analytics",
-          url: "/dashboard/analytics",
-        },
-        {
-          title: "Relatórios",
-          url: "/dashboard/reports",
-        },
-      ],
+      // items: [
+      //   {
+      //     title: "Visão Geral",
+      //     url: "/dashboard",
+      //   },
+      //   {
+      //     title: "Relatórios",
+      //     url: "/dashboard/reports",
+      //   },
+      // ],
     },
     {
       title: "WhatsApp",

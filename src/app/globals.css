@@ -37,6 +37,11 @@
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.723 0.219 149.579);
+
+  /* Variáveis específicas para scrollbar */
+  --scrollbar-bg: oklch(0.95 0.002 286.32);
+  --scrollbar-thumb: oklch(0.8 0.01 286.32);
+  --scrollbar-thumb-hover: oklch(0.723 0.219 149.579);
 }
 
 .dark {
@@ -71,6 +76,11 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.527 0.154 150.069);
+
+  /* Variáveis específicas para scrollbar no modo escuro */
+  --scrollbar-bg: oklch(0.18 0.006 285.885);
+  --scrollbar-thumb: oklch(0.35 0.008 286.033);
+  --scrollbar-thumb-hover: oklch(0.696 0.17 162.48);
 }
 
 @theme inline {
@@ -120,4 +130,204 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ================================
+   SCROLLBAR PERSONALIZADA
+   ================================ */
+
+/* Configuração geral da scrollbar */
+html {
+  scroll-behavior: smooth;
+}
+
+/* WebKit Browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-bg);
+  border-radius: calc(var(--radius) / 2);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: calc(var(--radius) / 2);
+  border: 1px solid var(--scrollbar-bg);
+  transition: all 0.2s ease-in-out;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  transform: scale(1.1);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-hover);
+  opacity: 0.8;
+}
+
+/* Corner onde as scrollbars se encontram */
+::-webkit-scrollbar-corner {
+  background: var(--scrollbar-bg);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+}
+
+/* Scrollbar hover para Firefox */
+@supports (scrollbar-color: red blue) {
+  * {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+  }
+
+  *:hover {
+    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-bg);
+  }
+}
+
+/* ================================
+   SCROLLBAR ESPECÍFICA PARA COMPONENTES
+   ================================ */
+
+/* Scrollbar mais fina para sidebar */
+.sidebar::-webkit-scrollbar,
+[data-sidebar]::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+[data-sidebar]::-webkit-scrollbar-thumb {
+  background: var(--sidebar-border);
+  border: none;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover,
+[data-sidebar]::-webkit-scrollbar-thumb:hover {
+  background: var(--sidebar-accent);
+}
+
+/* Scrollbar para componentes de dropdown/select */
+.dropdown-content::-webkit-scrollbar,
+.select-content::-webkit-scrollbar,
+[role="listbox"]::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dropdown-content::-webkit-scrollbar-thumb,
+.select-content::-webkit-scrollbar-thumb,
+[role="listbox"]::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+  border: none;
+}
+
+/* Scrollbar para cards com overflow */
+.card-scrollable::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.card-scrollable::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.card-scrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* ================================
+   ANIMAÇÕES SUAVES
+   ================================ */
+
+/* Transição suave para mudanças de tema */
+::-webkit-scrollbar-thumb {
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+::-webkit-scrollbar-track {
+  transition: background-color 0.2s ease;
+}
+
+/* ================================
+   MELHORIAS DE ACESSIBILIDADE
+   ================================ */
+
+/* Redução de movimento para usuários que preferem */
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    transform: none;
+  }
+}
+
+/* Contraste melhorado para usuários com necessidades especiais */
+@media (prefers-contrast: high) {
+  ::-webkit-scrollbar-thumb {
+    background: var(--foreground);
+    border: 2px solid var(--background);
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--background);
+    border: 1px solid var(--border);
+  }
+}
+
+/* ================================
+   UTILIDADES PARA COMPONENTES
+   ================================ */
+
+/* Classe para esconder scrollbar mas manter funcionalidade */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Classe para scrollbar sempre visível */
+.scrollbar-always {
+  overflow: auto !important;
+}
+
+.scrollbar-always::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+/* Classe para scrollbar style "floating" */
+.scrollbar-floating::-webkit-scrollbar {
+  width: 10px;
+  background: transparent;
+}
+
+.scrollbar-floating::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px;
+}
+
+.scrollbar-floating::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 10px;
+}
+
+.scrollbar-floating::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
 }
