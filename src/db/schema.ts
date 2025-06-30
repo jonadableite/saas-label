@@ -28,13 +28,14 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
 ]);
 
 export const messageStatusEnum = pgEnum("message_status", [
-  "pending", // Pendente
-  "queued", // Na fila
-  "sent", // Enviada
-  "delivered", // Entregue
-  "read", // Lida
-  "failed", // Falhou
-  "cancelled", // Cancelada
+  "pending", // Pendente (Ainda não processada pelo worker)
+  "queued", // Na fila (Adicionada à fila do worker)
+  "processing", // Processando (Worker pegou a mensagem)
+  "sent", // Enviada (API externa retornou sucesso)
+  "delivered", // Entregue (Webhook de entrega recebido)
+  "read", // Lida (Webhook de leitura recebido)
+  "failed", // Falhou (API externa retornou erro ou worker falhou após retentativas)
+  "cancelled", // Cancelada (Campanha cancelada antes do envio)
 ]);
 
 export const activityTypeEnum = pgEnum("activity_type", [
@@ -43,10 +44,14 @@ export const activityTypeEnum = pgEnum("activity_type", [
   "campaign_completed",
   "campaign_paused",
   "campaign_cancelled",
+  "campaign_failed", // Nova atividade para falha de campanha
   "instance_connected",
   "instance_disconnected",
   "instance_error",
+  "message_queued", // Nova atividade para mensagem adicionada à fila
   "message_sent",
+  "message_delivered", // Nova atividade para mensagem entregue
+  "message_read", // Nova atividade para mensagem lida
   "message_failed",
   "contact_imported",
   "contact_validated",
@@ -55,6 +60,11 @@ export const activityTypeEnum = pgEnum("activity_type", [
   "limit_reached",
   "system_error",
   "webhook_received",
+  "user_created", // Nova atividade de usuário
+  "user_updated", // Nova atividade de usuário
+  "instance_created", // Nova atividade de instância
+  "group_created", // Nova atividade de grupo
+  "contact_created", // Nova atividade de contato
 ]);
 
 export const activityStatusEnum = pgEnum("activity_status", [
@@ -62,6 +72,7 @@ export const activityStatusEnum = pgEnum("activity_status", [
   "warning",
   "error",
   "info",
+  "debug", // Adicionado para logs mais detalhados
 ]);
 
 export const templateTypeEnum = pgEnum("template_type", [
@@ -105,21 +116,23 @@ export const usersTables = pgTable("users_tables", {
     .notNull(),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
-  plan: text("plan").default("free"),
+  plan: text("plan").default("free").notNull(), // Definir default e notNull
 
   // Configurações do usuário
-  timezone: text("timezone").default("America/Sao_Paulo"),
-  dailyMessageLimit: integer("daily_message_limit").default(1000),
-  monthlyMessageLimit: integer("monthly_message_limit").default(10000),
-  isActive: boolean("is_active").default(true),
+  timezone: text("timezone").default("America/Sao_Paulo").notNull(), // Definir default e notNull
+  dailyMessageLimit: integer("daily_message_limit").default(1000).notNull(), // Definir default e notNull
+  monthlyMessageLimit: integer("monthly_message_limit")
+    .default(10000)
+    .notNull(), // Definir default e notNull
+  isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
 
-  // Estatísticas
-  totalCampaigns: integer("total_campaigns").default(0),
-  totalContacts: integer("total_contacts").default(0),
-  totalMessagesSent: integer("total_messages_sent").default(0),
+  // Estatísticas (Calculadas ou atualizadas por triggers/workers)
+  totalCampaigns: integer("total_campaigns").default(0).notNull(),
+  totalContacts: integer("total_contacts").default(0).notNull(),
+  totalMessagesSent: integer("total_messages_sent").default(0).notNull(),
 
   // Configurações avançadas
-  settings: jsonb("settings"), // Configurações em JSON
+  settings: jsonb("settings").default({}).notNull(), // Definir default como objeto vazio
 
   // Auditoria
   lastLoginAt: timestamp("last_login_at"),
@@ -135,13 +148,13 @@ export const instancesTables = pgTable(
       .references(() => usersTables.id, { onDelete: "cascade" }),
     instanceName: text("instance_name").notNull(),
     integration: text("integration").notNull().default("WHATSAPP-BAILEYS"),
-    status: text("status"),
+    status: text("status").default("disconnected").notNull(), // Definir default e notNull
     ownerJid: text("owner_jid"),
     profileName: text("profile_name"),
     profilePicUrl: text("profile_pic_url"),
-    qrcode: boolean("qrcode").default(true),
+    qrcode: boolean("qrcode").default(true).notNull(), // Definir default e notNull
     phoneNumber: text("phone_number"),
-    isActive: boolean("is_active").default(true),
+    isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
       .notNull(),
@@ -149,21 +162,23 @@ export const instancesTables = pgTable(
       .$defaultFn(() => new Date())
       .notNull(),
 
-    // Estatísticas da instância
-    totalMessagesSent: integer("total_messages_sent").default(0),
-    dailyMessagesSent: integer("daily_messages_sent").default(0),
-    monthlyMessagesSent: integer("monthly_messages_sent").default(0),
+    // Estatísticas da instância (Calculadas ou atualizadas por triggers/workers)
+    totalMessagesSent: integer("total_messages_sent").default(0).notNull(),
+    dailyMessagesSent: integer("daily_messages_sent").default(0).notNull(),
+    monthlyMessagesSent: integer("monthly_messages_sent").default(0).notNull(),
     lastMessageSentAt: timestamp("last_message_sent_at"),
-    lastResetAt: timestamp("last_reset_at").$defaultFn(() => new Date()),
+    lastResetAt: timestamp("last_reset_at")
+      .$defaultFn(() => new Date())
+      .notNull(), // Definir default e notNull
 
     // Status de conexão
-    isConnected: boolean("is_connected").default(false),
+    isConnected: boolean("is_connected").default(false).notNull(), // Definir default e notNull
     lastConnectedAt: timestamp("last_connected_at"),
     disconnectedAt: timestamp("disconnected_at"),
 
     // Configurações da instância
     webhookUrl: text("webhook_url"),
-    webhookEnabled: boolean("webhook_enabled").default(false),
+    webhookEnabled: boolean("webhook_enabled").default(false).notNull(), // Definir default e notNull
 
     // Auditoria
     deletedAt: timestamp("deleted_at"), // Soft delete
@@ -204,39 +219,44 @@ export const campaignsTables = pgTable(
     templateId: text("template_id").references(() => templatesTables.id, {
       onDelete: "set null",
     }),
-    scheduleAt: timestamp("schedule_at"),
-    startedAt: timestamp("started_at"),
-    completedAt: timestamp("completed_at"),
+    scheduleAt: timestamp("schedule_at"), // Data/hora agendada para iniciar
+    startedAt: timestamp("started_at"), // Data/hora real que iniciou
+    completedAt: timestamp("completed_at"), // Data/hora que terminou
     pausedAt: timestamp("paused_at"),
     cancelledAt: timestamp("cancelled_at"),
 
     // Configurações avançadas
-    sendDelay: integer("send_delay").default(1000), // ms entre mensagens
-    maxRetriesPerMessage: integer("max_retries_per_message").default(3),
-    enableScheduling: boolean("enable_scheduling").default(false),
-    sendOnlyBusinessHours: boolean("send_only_business_hours").default(false),
-    businessHoursStart: text("business_hours_start").default("09:00"),
-    businessHoursEnd: text("business_hours_end").default("18:00"),
+    sendDelay: integer("send_delay").default(1000).notNull(), // ms entre mensagens
+    maxRetriesPerMessage: integer("max_retries_per_message")
+      .default(3)
+      .notNull(),
+    enableScheduling: boolean("enable_scheduling").default(false).notNull(),
+    sendOnlyBusinessHours: boolean("send_only_business_hours")
+      .default(false)
+      .notNull(),
+    businessHoursStart: text("business_hours_start").default("09:00").notNull(),
+    businessHoursEnd: text("business_hours_end").default("18:00").notNull(),
 
     // Filtros e segmentação
-    targetGroups: text("target_groups").array(), // IDs dos grupos alvo
-    excludeGroups: text("exclude_groups").array(), // IDs dos grupos a excluir
+    targetGroups: text("target_groups").array().default([]).notNull(), // IDs dos grupos alvo
+    excludeGroups: text("exclude_groups").array().default([]).notNull(), // IDs dos grupos a excluir
 
-    // Estatísticas
-    totalContacts: integer("total_contacts").default(0),
-    messagesSent: integer("messages_sent").default(0),
-    messagesDelivered: integer("messages_delivered").default(0),
-    messagesRead: integer("messages_read").default(0),
-    messagesFailed: integer("messages_failed").default(0),
-    messagesQueued: integer("messages_queued").default(0),
+    // Estatísticas (Calculadas ou atualizadas por workers/triggers)
+    totalContacts: integer("total_contacts").default(0).notNull(), // Total de contatos na segmentação
+    messagesQueued: integer("messages_queued").default(0).notNull(), // Total de mensagens adicionadas à fila
+    messagesSent: integer("messages_sent").default(0).notNull(), // Total de mensagens enviadas pela API
+    messagesDelivered: integer("messages_delivered").default(0).notNull(), // Total de mensagens entregues (webhook)
+    messagesRead: integer("messages_read").default(0).notNull(), // Total de mensagens lidas (webhook)
+    messagesFailed: integer("messages_failed").default(0).notNull(), // Total de mensagens que falharam após retentativas
+    progressPercentage: integer("progress_percentage").default(0).notNull(), // Progresso calculado (messagesSent / totalContacts) * 100
 
-    // Estimativas e custos
-    estimatedCost: integer("estimated_cost").default(0), // em centavos
-    actualCost: integer("actual_cost").default(0), // em centavos
+    // Estimativas e custos (Opcional, pode ser calculado no frontend ou worker)
+    estimatedCost: integer("estimated_cost").default(0).notNull(), // em centavos
+    actualCost: integer("actual_cost").default(0).notNull(), // em centavos
 
     // Metadados
-    settings: jsonb("settings"), // Configurações adicionais em JSON
-    variables: jsonb("variables"), // Variáveis globais da campanha
+    settings: jsonb("settings").default({}).notNull(), // Configurações adicionais em JSON
+    variables: jsonb("variables").default({}).notNull(), // Variáveis globais da campanha
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -273,18 +293,18 @@ export const contactGroupsTables = pgTable(
 
     name: text("name").notNull(),
     description: text("description"),
-    color: text("color").default("#3b82f6"), // Cor para identificação
+    color: text("color").default("#3b82f6").notNull(), // Cor para identificação
 
     // Configurações do grupo
-    isDefault: boolean("is_default").default(false),
-    isSystemGroup: boolean("is_system_group").default(false), // Para grupos especiais
+    isDefault: boolean("is_default").default(false).notNull(),
+    isSystemGroup: boolean("is_system_group").default(false).notNull(), // Para grupos especiais
 
-    // Estatísticas
-    totalContacts: integer("total_contacts").default(0),
-    activeContacts: integer("active_contacts").default(0),
+    // Estatísticas (Calculadas ou atualizadas por triggers/workers)
+    totalContacts: integer("total_contacts").default(0).notNull(),
+    activeContacts: integer("active_contacts").default(0).notNull(),
 
     // Tags e categorização
-    tags: text("tags").array(),
+    tags: text("tags").array().default([]).notNull(),
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -331,37 +351,39 @@ export const contactsTables = pgTable(
     notes: text("notes"),
 
     // Dados adicionais
-    customFields: jsonb("custom_fields"), // Campos personalizados
-    tags: text("tags").array(), // Tags para classificação
+    customFields: jsonb("custom_fields").default({}).notNull(), // Campos personalizados
+    tags: text("tags").array().default([]).notNull(), // Tags para classificação
 
     // Endereço
-    address: jsonb("address"), // JSON com endereço completo
+    address: jsonb("address").default({}).notNull(), // JSON com endereço completo
 
     // Status e validação
-    isActive: boolean("is_active").default(true),
-    isBlocked: boolean("is_blocked").default(false),
-    isValidated: boolean("is_validated").default(false),
+    isActive: boolean("is_active").default(true).notNull(),
+    isBlocked: boolean("is_blocked").default(false).notNull(),
+    isValidated: boolean("is_validated").default(false).notNull(),
     validatedAt: timestamp("validated_at"),
 
     // Opt-out e privacidade
-    hasOptedOut: boolean("has_opted_out").default(false),
+    hasOptedOut: boolean("has_opted_out").default(false).notNull(),
     optedOutAt: timestamp("opted_out_at"),
-    gdprConsent: boolean("gdpr_consent").default(false),
+    gdprConsent: boolean("gdpr_consent").default(false).notNull(),
     consentDate: timestamp("consent_date"),
 
-    // Estatísticas de interação
-    totalMessagesSent: integer("total_messages_sent").default(0),
-    totalMessagesReceived: integer("total_messages_received").default(0),
-    totalCampaigns: integer("total_campaigns").default(0),
+    // Estatísticas de interação (Calculadas ou atualizadas por workers/triggers)
+    totalMessagesSent: integer("total_messages_sent").default(0).notNull(),
+    totalMessagesReceived: integer("total_messages_received")
+      .default(0)
+      .notNull(),
+    totalCampaigns: integer("total_campaigns").default(0).notNull(),
     lastMessageAt: timestamp("last_message_at"),
     lastCampaignAt: timestamp("last_campaign_at"),
 
-    // Pontuação de engajamento
-    engagementScore: integer("engagement_score").default(0), // 0-100
+    // Pontuação de engajamento (Calculada ou atualizada por workers/triggers)
+    engagementScore: integer("engagement_score").default(0).notNull(), // 0-100
 
     // Origem do contato
     source: text("source"), // manual, import, api, form, etc.
-    sourceDetails: jsonb("source_details"),
+    sourceDetails: jsonb("source_details").default({}).notNull(),
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -405,7 +427,7 @@ export const contactGroupMembersTables = pgTable(
 
     // Dados adicionais da associação
     addedBy: text("added_by"), // ID do usuário que adicionou
-    isActive: boolean("is_active").default(true),
+    isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -446,7 +468,7 @@ export const templatesTables = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     type: templateTypeEnum("type").default("text").notNull(),
-    category: text("category").default("general"), // marketing, support, notification
+    category: text("category").default("general").notNull(), // marketing, support, notification
 
     // Conteúdo
     content: text("content").notNull(),
@@ -460,28 +482,28 @@ export const templatesTables = pgTable(
     listSections: jsonb("list_sections"), // Seções da lista
 
     // Variáveis disponíveis no template
-    variables: text("variables").array(), // Ex: ["nome", "empresa"]
-    requiredVariables: text("required_variables").array(), // Variáveis obrigatórias
+    variables: text("variables").array().default([]).notNull(), // Ex: ["nome", "empresa"]
+    requiredVariables: text("required_variables").array().default([]).notNull(), // Variáveis obrigatórias
 
     // Configurações
-    isActive: boolean("is_active").default(true),
-    isDefault: boolean("is_default").default(false),
-    isSystemTemplate: boolean("is_system_template").default(false),
+    isActive: boolean("is_active").default(true).notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    isSystemTemplate: boolean("is_system_template").default(false).notNull(),
 
-    // Aprovação e moderação
-    isApproved: boolean("is_approved").default(true),
+    // Aprovação e moderação (Se aplicável, ex: WhatsApp Business API templates)
+    isApproved: boolean("is_approved").default(true).notNull(), // Assume true por padrão para integrações não-oficiais
     approvedBy: text("approved_by"),
     approvedAt: timestamp("approved_at"),
     rejectionReason: text("rejection_reason"),
 
-    // Estatísticas
-    timesUsed: integer("times_used").default(0),
-    successRate: integer("success_rate").default(0), // Porcentagem de sucesso
-    avgDeliveryTime: integer("avg_delivery_time").default(0), // Em segundos
+    // Estatísticas (Calculadas ou atualizadas por workers/triggers)
+    timesUsed: integer("times_used").default(0).notNull(),
+    successRate: integer("success_rate").default(0).notNull(), // Porcentagem de sucesso (0-100)
+    avgDeliveryTime: integer("avg_delivery_time").default(0).notNull(), // Em segundos
     lastUsedAt: timestamp("last_used_at"),
 
     // SEO e busca
-    tags: text("tags").array(),
+    tags: text("tags").array().default([]).notNull(),
     searchKeywords: text("search_keywords"),
 
     // Auditoria
@@ -505,7 +527,7 @@ export const templatesTables = pgTable(
 );
 
 // ================================
-// TABELAS DE CAMPANHAS E CONTATOS
+// TABELAS DE CAMPANHAS E CONTATOS (MENSAGENS INDIVIDUAIS)
 // ================================
 
 export const campaignContactsTables = pgTable(
@@ -523,36 +545,40 @@ export const campaignContactsTables = pgTable(
 
     // Status do envio para este contato
     status: messageStatusEnum("status").default("pending").notNull(),
-    priority: integer("priority").default(1), // 1-5, 1 sendo maior prioridade
+    priority: integer("priority").default(1).notNull(), // 1-5, 1 sendo maior prioridade
 
     // Dados da mensagem personalizada
     personalizedContent: text("personalized_content"), // Conteúdo com variáveis substituídas
-    variables: jsonb("variables"), // Variáveis específicas deste contato
+    variables: jsonb("variables").default({}).notNull(), // Variáveis específicas deste contato
     mediaUrl: text("media_url"), // URL da mídia personalizada se houver
+    // Adicionar campos para tipos de template específicos se necessário (ex: buttons, list_sections)
+    buttons: jsonb("buttons"),
+    listSections: jsonb("list_sections"),
 
     // Tentativas e erros
-    attempts: integer("attempts").default(0),
-    maxAttempts: integer("max_attempts").default(3),
+    attempts: integer("attempts").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
     lastAttemptAt: timestamp("last_attempt_at"),
-    nextAttemptAt: timestamp("next_attempt_at"),
+    nextAttemptAt: timestamp("next_attempt_at"), // Usado para agendar retentativas
     errorMessage: text("error_message"),
     errorCode: text("error_code"),
 
-    // IDs de mensagem do WhatsApp
-    messageId: text("message_id"), // ID da mensagem no WhatsApp
-    remoteJid: text("remote_jid"), // JID do contato no WhatsApp
+    // IDs de mensagem do WhatsApp (API Externa)
+    messageId: text("message_id"), // ID da mensagem retornado pela API externa
+    remoteJid: text("remote_jid"), // JID do contato no WhatsApp (pode ser diferente do phoneNumber)
 
     // Timestamps de status
-    queuedAt: timestamp("queued_at"),
-    sentAt: timestamp("sent_at"),
-    deliveredAt: timestamp("delivered_at"),
-    readAt: timestamp("read_at"),
-    failedAt: timestamp("failed_at"),
-    cancelledAt: timestamp("cancelled_at"),
+    queuedAt: timestamp("queued_at"), // Quando foi adicionada à fila do worker
+    processingAt: timestamp("processing_at"), // Quando o worker começou a processar
+    sentAt: timestamp("sent_at"), // Quando a API externa retornou sucesso
+    deliveredAt: timestamp("delivered_at"), // Quando o webhook de entrega foi recebido
+    readAt: timestamp("read_at"), // Quando o webhook de leitura foi recebido
+    failedAt: timestamp("failed_at"), // Quando falhou após retentativas
+    cancelledAt: timestamp("cancelled_at"), // Quando foi cancelada
 
-    // Métricas de entrega
-    deliveryTime: integer("delivery_time"), // Tempo para entrega em segundos
-    readTime: integer("read_time"), // Tempo para leitura em segundos
+    // Métricas de entrega (Calculadas)
+    deliveryTime: integer("delivery_time"), // Tempo para entrega em segundos (sentAt - queuedAt) ou (deliveredAt - sentAt) dependendo da definição
+    readTime: integer("read_time"), // Tempo para leitura em segundos (readAt - deliveredAt)
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -622,15 +648,22 @@ export const activitiesTables = pgTable(
     templateId: text("template_id").references(() => templatesTables.id, {
       onDelete: "set null",
     }),
+    // Adicionar referência para campaign_contact_id se a atividade for específica de uma mensagem
+    campaignContactId: text("campaign_contact_id").references(
+      () => campaignContactsTables.id,
+      {
+        onDelete: "set null",
+      },
+    ),
 
     // Dados adicionais
-    metadata: jsonb("metadata"), // Dados específicos da atividade
-    tags: text("tags").array(),
+    metadata: jsonb("metadata").default({}).notNull(), // Dados específicos da atividade
+    tags: text("tags").array().default([]).notNull(),
 
     // Impacto e importância
-    severity: text("severity").default("low"), // low, medium, high, critical
-    isRead: boolean("is_read").default(false),
-    isArchived: boolean("is_archived").default(false),
+    severity: text("severity").default("low").notNull(), // low, medium, high, critical
+    isRead: boolean("is_read").default(false).notNull(),
+    isArchived: boolean("is_archived").default(false).notNull(),
 
     // Duração (para atividades que têm início e fim)
     startedAt: timestamp("started_at"),
@@ -653,6 +686,9 @@ export const activitiesTables = pgTable(
     campaignIdx: index("activities_campaign_idx").on(activities.campaignId),
     instanceIdx: index("activities_instance_idx").on(activities.instanceId),
     contactIdx: index("activities_contact_idx").on(activities.contactId),
+    campaignContactIdx: index("activities_campaign_contact_idx").on(
+      activities.campaignContactId,
+    ), // Novo índice
   }),
 );
 
@@ -678,24 +714,24 @@ export const contactImportsTables = pgTable(
 
     // Status e progresso
     status: importStatusEnum("status").default("pending").notNull(),
-    totalRows: integer("total_rows").default(0),
-    processedRows: integer("processed_rows").default(0),
-    successfulRows: integer("successful_rows").default(0),
-    failedRows: integer("failed_rows").default(0),
-    skippedRows: integer("skipped_rows").default(0),
+    totalRows: integer("total_rows").default(0).notNull(),
+    processedRows: integer("processed_rows").default(0).notNull(),
+    successfulRows: integer("successful_rows").default(0).notNull(),
+    failedRows: integer("failed_rows").default(0).notNull(),
+    skippedRows: integer("skipped_rows").default(0).notNull(),
 
     // Configurações da importação
-    groupIds: text("group_ids").array(), // Grupos para adicionar os contatos
-    skipDuplicates: boolean("skip_duplicates").default(true),
-    validateNumbers: boolean("validate_numbers").default(true),
-    fieldMapping: jsonb("field_mapping"), // Mapeamento dos campos
+    groupIds: text("group_ids").array().default([]).notNull(), // Grupos para adicionar os contatos
+    skipDuplicates: boolean("skip_duplicates").default(true).notNull(),
+    validateNumbers: boolean("validate_numbers").default(true).notNull(),
+    fieldMapping: jsonb("field_mapping").default({}).notNull(), // Mapeamento dos campos
 
     // Resultados e erros
-    errors: jsonb("errors"), // Lista de erros encontrados
-    warnings: jsonb("warnings"), // Lista de avisos
+    errors: jsonb("errors").default([]).notNull(), // Lista de erros encontrados
+    warnings: jsonb("warnings").default([]).notNull(), // Lista de avisos
 
     // Progresso
-    progressPercentage: integer("progress_percentage").default(0),
+    progressPercentage: integer("progress_percentage").default(0).notNull(),
     estimatedTimeRemaining: integer("estimated_time_remaining"), // Em segundos
 
     // Auditoria
@@ -856,7 +892,7 @@ export const templatesRelations = relations(
 
 export const campaignContactsRelations = relations(
   campaignContactsTables,
-  ({ one }) => ({
+  ({ one, many }) => ({
     campaign: one(campaignsTables, {
       fields: [campaignContactsTables.campaignId],
       references: [campaignsTables.id],
@@ -865,6 +901,7 @@ export const campaignContactsRelations = relations(
       fields: [campaignContactsTables.contactId],
       references: [contactsTables.id],
     }),
+    activities: many(activitiesTables), // Adicionar relação com activities
   }),
 );
 
@@ -888,6 +925,11 @@ export const activitiesRelations = relations(activitiesTables, ({ one }) => ({
   template: one(templatesTables, {
     fields: [activitiesTables.templateId],
     references: [templatesTables.id],
+  }),
+  campaignContact: one(campaignContactsTables, {
+    // Nova relação
+    fields: [activitiesTables.campaignContactId],
+    references: [campaignContactsTables.id],
   }),
 }));
 
@@ -928,43 +970,47 @@ export const CreateInstanceSchema = z.object({
 export const CreateCampaignSchema = z.object({
   name: z.string().min(1, "Nome da campanha é obrigatório").max(100),
   description: z.string().max(500).optional(),
-  instanceId: z.string().optional(),
-  templateId: z.string().optional(),
-  scheduleAt: z.date().optional(),
-  sendDelay: z.number().min(100).max(60000).default(1000),
-  maxRetriesPerMessage: z.number().min(0).max(5).default(3),
+  instanceId: z.string().optional(), // Pode ser null/undefined inicialmente se a instância for selecionada depois
+  templateId: z.string().optional(), // Pode ser null/undefined inicialmente se o template for selecionado depois
+  scheduleAt: z.date().optional().nullable(), // Permitir null
+  sendDelay: z.number().int().min(100).max(60000).default(1000),
+  maxRetriesPerMessage: z.number().int().min(0).max(5).default(3),
   enableScheduling: z.boolean().default(false),
   sendOnlyBusinessHours: z.boolean().default(false),
   businessHoursStart: z
     .string()
-    .regex(/^\d{2}:\d{2}$/)
+    .regex(/^\d{2}:\d{2}$/, "Formato de hora inválido (HH:mm)")
     .default("09:00"),
   businessHoursEnd: z
     .string()
-    .regex(/^\d{2}:\d{2}$/)
+    .regex(/^\d{2}:\d{2}$/, "Formato de hora inválido (HH:mm)")
     .default("18:00"),
-  targetGroups: z.array(z.string()).optional(),
-  excludeGroups: z.array(z.string()).optional(),
-  settings: z.record(z.any()).optional(),
-  variables: z.record(z.any()).optional(),
+  targetGroups: z.array(z.string()).optional().default([]),
+  excludeGroups: z.array(z.string()).optional().default([]),
+  settings: z.record(z.any()).optional().default({}),
+  variables: z.record(z.any()).optional().default({}),
 });
 
 export const CreateContactSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
+  name: z.string().min(1).max(100).optional(), // Nome pode ser opcional se firstName/lastName existirem
   firstName: z.string().max(50).optional(),
   lastName: z.string().max(50).optional(),
-  phoneNumber: z.string().min(9, "Número de telefone inválido").max(15),
-  email: z.string().email().optional().or(z.literal("")),
+  phoneNumber: z.string().min(9, "Número de telefone inválido").max(15), // Adicionar validação de formato de telefone mais robusta se necessário
+  email: z
+    .string()
+    .email("Formato de email inválido")
+    .optional()
+    .or(z.literal("")),
   company: z.string().max(100).optional(),
   position: z.string().max(100).optional(),
-  birthDate: z.date().optional(),
+  birthDate: z.date().optional().nullable(),
   notes: z.string().max(1000).optional(),
-  customFields: z.record(z.any()).optional(),
-  tags: z.array(z.string()).optional(),
-  address: z.record(z.any()).optional(),
-  groupIds: z.array(z.string()).optional(),
+  customFields: z.record(z.any()).optional().default({}),
+  tags: z.array(z.string()).optional().default([]),
+  address: z.record(z.any()).optional().default({}),
+  groupIds: z.array(z.string()).optional().default([]), // IDs dos grupos para adicionar o contato
   source: z.string().optional(),
-  sourceDetails: z.record(z.any()).optional(),
+  sourceDetails: z.record(z.any()).optional().default({}),
   gdprConsent: z.boolean().default(false),
 });
 
@@ -973,67 +1019,49 @@ export const CreateContactGroupSchema = z.object({
   description: z.string().max(500).optional(),
   color: z
     .string()
-    .regex(/^#[0-9A-F]{6}$/i)
+    .regex(/^#[0-9A-F]{6}$/i, "Formato de cor inválido (HEX)")
     .default("#3b82f6"),
-  tags: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional().default([]),
 });
 
 export const CreateTemplateSchema = z.object({
   name: z.string().min(1, "Nome do template é obrigatório").max(100),
   description: z.string().max(500).optional(),
   type: z
-    .enum([
-      "text",
-      "image",
-      "document",
-      "video",
-      "audio",
-      "sticker",
-      "location",
-      "contact",
-      "list",
-      "button",
-    ])
+    .enum(templateTypeEnum.enumValues) // Usar enumValues do drizzle
     .default("text"),
   category: z.string().max(50).default("general"),
   content: z.string().min(1, "Conteúdo é obrigatório"),
-  mediaUrl: z.string().url().optional().or(z.literal("")),
+  mediaUrl: z.string().url("URL inválida").optional().or(z.literal("")),
   fileName: z.string().optional(),
-  buttons: z.array(z.any()).optional(),
-  listSections: z.array(z.any()).optional(),
-  variables: z.array(z.string()).optional(),
-  requiredVariables: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
+  buttons: z.array(z.any()).optional().default([]), // Definir default como array vazio
+  listSections: z.array(z.any()).optional().default([]), // Definir default como array vazio
+  variables: z.array(z.string()).optional().default([]),
+  requiredVariables: z.array(z.string()).optional().default([]),
+  tags: z.array(z.string()).optional().default([]),
   searchKeywords: z.string().optional(),
 });
 
 export const UpdateCampaignStatusSchema = z.object({
-  status: z.enum([
-    "draft",
-    "scheduled",
-    "running",
-    "paused",
-    "completed",
-    "cancelled",
-    "failed",
-  ]),
+  status: z.enum(campaignStatusEnum.enumValues), // Usar enumValues do drizzle
 });
 
 export const ImportContactsSchema = z.object({
   fileName: z.string().min(1),
   originalFileName: z.string().min(1),
-  fileSize: z.number().min(1),
+  fileSize: z.number().int().min(1),
   fileType: z.enum(["csv", "xlsx", "xls"]),
-  groupIds: z.array(z.string()).optional(),
+  groupIds: z.array(z.string()).optional().default([]),
   skipDuplicates: z.boolean().default(true),
   validateNumbers: z.boolean().default(true),
-  fieldMapping: z.record(z.string()).optional(),
+  fieldMapping: z.record(z.string()).optional().default({}),
 });
 
 // ================================
 // TIPOS TYPESCRIPT
 // ================================
 
+// Usar inferSelect e inferInsert para obter os tipos diretamente do schema
 export type User = typeof usersTables.$inferSelect;
 export type NewUser = typeof usersTables.$inferInsert;
 
@@ -1059,12 +1087,16 @@ export type NewTemplate = typeof templatesTables.$inferInsert;
 export type CampaignContact = typeof campaignContactsTables.$inferSelect;
 export type NewCampaignContact = typeof campaignContactsTables.$inferInsert;
 
+export type CreateCampaignInput = z.infer<typeof CreateCampaignSchema>;
+export type UpdateCampaignInput = z.infer<typeof CreateCampaignSchema>;
+
 export type Activity = typeof activitiesTables.$inferSelect;
 export type NewActivity = typeof activitiesTables.$inferInsert;
 
 export type ContactImport = typeof contactImportsTables.$inferSelect;
 export type NewContactImport = typeof contactImportsTables.$inferInsert;
 
+// Tipos para os enums, usando os próprios enums do drizzle
 export type CampaignStatus = (typeof campaignStatusEnum.enumValues)[number];
 export type MessageStatus = (typeof messageStatusEnum.enumValues)[number];
 export type ActivityType = (typeof activityTypeEnum.enumValues)[number];

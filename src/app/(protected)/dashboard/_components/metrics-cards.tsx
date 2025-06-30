@@ -48,16 +48,14 @@ const MetricCard = ({
   formatter?: (value: number) => string;
 }) => {
   const isPositive = change >= 0;
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: index * 0.1 }}
     >
-      <Card className="group relative overflow-hidden transition-all duration-300 hover:shadow-lg">
-        <div className="from-primary/5 to-primary/10 absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-
+      <Card className="group hover:shadow-primary-foreground/20 relative overflow-hidden transition-all duration-300 hover:scale-[1.02]">
+        <div className="bg-primary-foreground/5 absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />{" "}
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-muted-foreground text-sm font-medium">
             {title}
@@ -66,7 +64,6 @@ const MetricCard = ({
             <Icon className="text-primary h-4 w-4" />
           </div>
         </CardHeader>
-
         <CardContent>
           <div className="flex items-center justify-between">
             <div>
@@ -78,7 +75,6 @@ const MetricCard = ({
               >
                 {formatter(value)}
               </motion.div>
-
               <div className="text-muted-foreground mt-1 flex items-center text-xs">
                 {isPositive ? (
                   <TrendingUp className="mr-1 h-3 w-3 text-emerald-500" />
@@ -132,7 +128,6 @@ export function MetricsCards({ instances, metrics }: MetricsCardsProps) {
       formatter: (v: number) => v.toLocaleString(),
     },
   ];
-
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
       {cards.map((card, index) => (

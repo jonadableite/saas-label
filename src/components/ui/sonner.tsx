@@ -1,10 +1,12 @@
-"use client"
+// src/components/ui/sonner.tsx
+"use client";
 
-import { useTheme } from "next-themes"
-import { Toaster as Sonner, ToasterProps } from "sonner"
+import { useTheme } from "next-themes";
+import { Toaster as Sonner, ToasterProps } from "sonner";
 
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+// Adiciona um valor padrão de {} para props
+const Toaster = ({ ...props }: ToasterProps = {}) => {
+  const { theme = "system" } = useTheme();
 
   return (
     <Sonner
@@ -19,7 +21,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }
       {...props}
     />
-  )
-}
+  );
+};
 
-export { Toaster }
+export { Toaster };

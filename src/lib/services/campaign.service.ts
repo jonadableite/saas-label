@@ -1,184 +1,138 @@
 // src/lib/services/campaign.service.ts
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
 import {
-  type Campaign,
+  Campaign,
   campaignContactsTables,
   campaignsTables,
-  type CampaignStatus,
+  CampaignStatus,
   contactGroupMembersTables,
-  contactGroupsTables,
-  contactsTables,
+  CreateCampaignInput,
+  CreateCampaignSchema,
   instancesTables,
-  templatesTables
+  templatesTables,
+  UpdateCampaignInput,
 } from "@/db/schema";
-
-// Schema para criação de campanha
-export const CreateCampaignSchema = z.object({
-  name: z.string().min(1, "Nome da campanha é obrigatório"),
-  description: z.string().optional(),
-  instanceId: z.string().min(1, "Instância é obrigatória"),
-  templateId: z.string().optional(),
-  messageContent: z.string().min(1, "Conteúdo da mensagem é obrigatório"),
-
-  // Agendamento
-  enableScheduling: z.boolean().default(false),
-  scheduleAt: z.date().optional().nullable(), // Tornado opcional e nullable
-
-  // Configurações avançadas
-  sendDelay: z.number().min(1000).default(2000),
-  maxRetriesPerMessage: z.number().min(1).max(5).default(3),
-  sendOnlyBusinessHours: z.boolean().default(false),
-  businessHoursStart: z.string().default("09:00"),
-  businessHoursEnd: z.string().default("18:00"),
-
-  // Público alvo
-  contactIds: z.array(z.string()).default([]),
-  groupIds: z.array(z.string()).default([]),
-})
-.refine((data) => {
-  // Validação mais flexível: só exige scheduleAt se enableScheduling for true
-  if (data.enableScheduling && !data.scheduleAt) {
-    return false;
-  }
-  return true;
-}, {
-  message: "Data de agendamento é obrigatória quando agendamento está habilitado",
-  path: ["scheduleAt"],
-})
-.refine((data) => {
-  return data.contactIds.length > 0 || data.groupIds.length > 0;
-}, {
-  message: "Selecione pelo menos um contato ou grupo",
-  path: ["contactIds"],
-});
-
-// Schema para atualização - definido manualmente sem usar .partial()
-export const UpdateCampaignSchema = z.object({
-  name: z.string().min(1, "Nome da campanha é obrigatório").optional(),
-  description: z.string().optional(),
-  instanceId: z.string().min(1, "Instância é obrigatória").optional(),
-  templateId: z.string().optional(),
-  messageContent: z.string().min(1, "Conteúdo da mensagem é obrigatório").optional(),
-  enableScheduling: z.boolean().optional(),
-  scheduleAt: z.date().optional().nullable(), // Também tornado opcional e nullable
-  sendDelay: z.number().min(1000).optional(),
-  maxRetriesPerMessage: z.number().min(1).max(5).optional(),
-  sendOnlyBusinessHours: z.boolean().optional(),
-  businessHoursStart: z.string().optional(),
-  businessHoursEnd: z.string().optional(),
-});
-
-export type CreateCampaignInput = z.infer<typeof CreateCampaignSchema>;
-export type UpdateCampaignInput = z.infer<typeof UpdateCampaignSchema>;
+import { rabbitmq, redis } from "@/lib/queue/config"; // Importar rabbitmq
 
 export class CampaignService {
+  // Método para logar atividades - agora publica na fila
+  private async logActivity(
+    userId: string,
+    activity: {
+      type: string; // Usar activityTypeEnum.Enum
+      status: string; // Usar activityStatusEnum.Enum
+      title: string;
+      description: string;
+      campaignId?: string;
+      instanceId?: string;
+      contactId?: string;
+      templateId?: string;
+      groupId?: string;
+      messageId?: string;
+      metadata?: any;
+    },
+  ): Promise<void> {
+    // Publica a atividade na fila para ser processada pelo ActivityWorker
+    try {
+      await rabbitmq.publishMessage("activities", "activities.log", {
+        userId,
+        ...activity,
+        createdAt: new Date(), // Adiciona timestamp para o worker
+      });
+      console.log("Activity enqueued:", activity.type);
+    } catch (error) {
+      console.error("Failed to enqueue activity:", error); // Fallback: log directly if queueing fails
+      // TODO: Implementar fallback para salvar no DB se a fila falhar
+      // await db.insert(...).values(...)
+    }
+  }
+
   async createCampaign(
     userId: string,
     data: CreateCampaignInput,
   ): Promise<Campaign> {
     try {
-      console.log("Iniciando criação de campanha:", { userId, data });
+      // Valida os dados de entrada usando o schema Zod
+      // Assumimos que CreateCampaignSchema inclui validação para targetGroups e targetContactIds
+      const validatedData = CreateCampaignSchema.parse(data); // Verifica se um template foi fornecido e se ele existe para o usuário
 
-      const validatedData = CreateCampaignSchema.parse(data);
-      console.log("Dados validados:", validatedData);
-
-      // Verificar se a instância existe e está ativa
-      if (validatedData.instanceId) {
-        console.log("Verificando instância:", validatedData.instanceId);
-
-        const instance = await db.query.instancesTables.findFirst({
-          where: and(
-            eq(instancesTables.instanceId, validatedData.instanceId),
-            eq(instancesTables.userId, userId),
-          ),
-        });
-
-        if (!instance) {
-          throw new Error("Instância não encontrada");
-        }
-
-        if (instance.status !== "open") {
-          throw new Error("Instância não está conectada");
-        }
-
-        console.log("Instância válida:", instance.instanceName);
-      }
-
-      // Verificar template se fornecido
       if (validatedData.templateId) {
-        console.log("Verificando template:", validatedData.templateId);
-
         const template = await db.query.templatesTables.findFirst({
           where: and(
             eq(templatesTables.id, validatedData.templateId),
             eq(templatesTables.userId, userId),
           ),
         });
-
         if (!template) {
           throw new Error("Template não encontrado");
-        }
+        } // TODO: Validar se as requiredVariables do template estão disponíveis (globalmente na campanha ou por contato)
+      } else {
+        // Se não tem template, a campanha não tem conteúdo para enviar
+        throw new Error("Template é obrigatório para criar uma campanha");
+      } // Coletar IDs de contatos únicos de grupos alvo e contatos individuais
 
-        console.log("Template válido:", template.name);
+      const allContactIds = new Set<string>(); // Adicionar contatos diretos (se fornecidos)
+
+      const targetContactIds = validatedData.targetContactIds; // Usar diretamente do validatedData
+      if (targetContactIds?.length) {
+        targetContactIds.forEach((id: string) => allContactIds.add(id));
+      } // Adicionar contatos dos grupos alvo (se fornecidos)
+
+      if (validatedData.targetGroups?.length) {
+        const groupContacts = await db.query.contactGroupMembersTables.findMany(
+          {
+            where: inArray(
+              contactGroupMembersTables.groupId,
+              validatedData.targetGroups,
+            ),
+            columns: {
+              contactId: true,
+            },
+          },
+        );
+        groupContacts.forEach((member) => allContactIds.add(member.contactId));
+      } // Excluir contatos de grupos de exclusão (se fornecidos)
+
+      if (validatedData.excludeGroups?.length) {
+        const excludeContacts =
+          await db.query.contactGroupMembersTables.findMany({
+            where: inArray(
+              contactGroupMembersTables.groupId,
+              validatedData.excludeGroups,
+            ),
+            columns: {
+              contactId: true,
+            },
+          });
+        excludeContacts.forEach((member) =>
+          allContactIds.delete(member.contactId),
+        );
       }
 
-      // Coletar todos os contatos (individuais + grupos)
-      let allContactIds: string[] = [...(validatedData.contactIds || [])];
+      const finalContactIds = Array.from(allContactIds);
+      console.log(
+        `Calculated finalContactIds count: ${finalContactIds.length}`,
+      ); // Log para verificar a contagem
+      // Determinar status inicial
 
-      // Se houver grupos selecionados, buscar contatos dos grupos
-      if (validatedData.groupIds && validatedData.groupIds.length > 0) {
-        console.log("Buscando contatos dos grupos:", validatedData.groupIds);
+      const campaignStatus: CampaignStatus =
+        validatedData.enableScheduling && validatedData.scheduleAt
+          ? "scheduled"
+          : "draft"; // Começa como draft, startCampaign vai mudar para running
+      // Criar a campanha no banco de dados
 
-        const groupContacts = await db
-          .select({
-            contactId: contactGroupMembersTables.contactId
-          })
-          .from(contactGroupMembersTables)
-          .innerJoin(contactsTables, eq(contactsTables.id, contactGroupMembersTables.contactId))
-          .innerJoin(contactGroupsTables, eq(contactGroupsTables.id, contactGroupMembersTables.groupId))
-          .where(and(
-            inArray(contactGroupMembersTables.groupId, validatedData.groupIds),
-            eq(contactGroupMembersTables.isActive, true),
-            eq(contactsTables.userId, userId),
-            eq(contactsTables.isActive, true)
-          ));
-
-        const groupContactIds = groupContacts.map(gc => gc.contactId);
-        allContactIds = [...allContactIds, ...groupContactIds];
-
-        console.log("Contatos encontrados nos grupos:", groupContactIds.length);
-      }
-
-      // Remover duplicatas
-      allContactIds = [...new Set(allContactIds)];
-      console.log("Total de contatos únicos:", allContactIds.length);
-
-      if (allContactIds.length === 0) {
-        throw new Error("Nenhum contato encontrado para a campanha");
-      }
-
-      // Determinar status da campanha baseado no agendamento
-      let campaignStatus: CampaignStatus = "draft";
-      if (validatedData.enableScheduling && validatedData.scheduleAt) {
-        campaignStatus = "scheduled";
-      } else if (!validatedData.enableScheduling) {
-        campaignStatus = "draft"; // Será iniciada imediatamente após criação
-      }
-
-      // Criar a campanha
       console.log("Criando campanha no banco...");
       const [campaign] = await db
         .insert(campaignsTables)
         .values({
           userId,
-          instanceId: validatedData.instanceId,
+          instanceId: validatedData.instanceId || null,
           name: validatedData.name,
           description: validatedData.description || null,
           templateId: validatedData.templateId || null,
-          messageContent: validatedData.messageContent,
           status: campaignStatus,
           scheduleAt: validatedData.scheduleAt || null,
           sendDelay: validatedData.sendDelay,
@@ -186,52 +140,76 @@ export class CampaignService {
           sendOnlyBusinessHours: validatedData.sendOnlyBusinessHours,
           businessHoursStart: validatedData.businessHoursStart,
           businessHoursEnd: validatedData.businessHoursEnd,
-          totalContacts: allContactIds.length,
-          sentCount: 0,
-          deliveredCount: 0,
-          readCount: 0,
-          errorCount: 0,
+          targetGroups: validatedData.targetGroups || [], // <-- SALVANDO OS IDs DOS GRUPOS AQUI
+          targetContacts: validatedData.targetContactIds || [], // <-- SALVANDO OS IDs DOS CONTATOS INDIVIDUAIS AQUI
+          totalContacts: finalContactIds.length, // <-- SALVANDO O TOTAL CALCULADO AQUI
+          messagesSent: 0,
+          messagesDelivered: 0,
+          messagesRead: 0,
+          messagesFailed: 0,
+          messagesQueued: 0, // Inicializa contadores
         })
         .returning();
 
-      console.log("Campanha criada:", campaign.id);
+      console.log("Campanha criada:", campaign.id); // Adicionar contatos à campanha na tabela campaignContactsTables
+      // Esta tabela é a fonte primária de dados para o worker de execução
 
-      // Adicionar contatos à campanha
-      if (allContactIds.length > 0) {
-        console.log("Adicionando contatos à campanha...");
-        await this.addContactsToCampaign(campaign.id, {
-          contactIds: allContactIds,
-          groupIds: [],
-        });
-        console.log(`${allContactIds.length} contatos adicionados à campanha`);
-      }
+      if (finalContactIds.length > 0) {
+        console.log(
+          "Adicionando contatos à campanha na tabela campaignContactsTables...",
+        );
+        const campaignContactsToInsert = finalContactIds.map((contactId) => ({
+          campaignId: campaign.id,
+          contactId: contactId,
+          status: "pending" as const, // Status inicial é pending
+          attempts: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })); // Inserção em lotes para performance
 
-      // Log da atividade
+        const batchSize = 1000;
+        for (let i = 0; i < campaignContactsToInsert.length; i += batchSize) {
+          const batch = campaignContactsToInsert.slice(i, i + batchSize);
+          await db
+            .insert(campaignContactsTables)
+            .values(batch)
+            .onConflictDoNothing(); // Evita duplicatas se houver retries
+        }
+
+        console.log(
+          `${finalContactIds.length} contatos adicionados à tabela campaignContactsTables`,
+        );
+      } else {
+        console.warn(
+          "Nenhum contato encontrado para esta campanha após aplicar filtros.",
+        );
+      } // Log da atividade de criação
+
       await this.logActivity(userId, {
         type: "campaign_created",
         status: "success",
         title: "Nova campanha criada",
-        description: `Campanha '${campaign.name}' foi criada com ${allContactIds.length} contatos`,
+        description: `Campanha '${campaign.name}' foi criada com ${finalContactIds.length} contatos`,
         campaignId: campaign.id,
-      });
+      }); // Lógica de início/agendamento
 
-      // Lógica de início/agendamento
-      if (validatedData.enableScheduling && validatedData.scheduleAt) {
-        console.log("Agendando campanha para:", validatedData.scheduleAt);
-        await this.scheduleCampaign(campaign.id);
-      } else if (!validatedData.enableScheduling) {
-        console.log("Iniciando campanha imediatamente...");
+      if (campaign.status === "scheduled") {
+        console.log("Campanha agendada para:", campaign.scheduleAt); // O agendador (worker separado) será responsável por chamar startCampaign no horário correto
+      } else {
+        // Status é "draft", iniciar imediatamente
+        console.log("Iniciando campanha imediatamente..."); // startCampaign agora enfilera a execução para o worker 'campaign.execute'
         await this.startCampaign(userId, campaign.id);
       }
 
-      console.log("Campanha criada com sucesso:", campaign.id);
+      console.log("Processo de criação da campanha concluído:", campaign.id);
       return campaign;
-
     } catch (error) {
       console.error("Erro ao criar campanha:", error);
 
       if (error instanceof z.ZodError) {
-        throw new Error(`Dados inválidos: ${error.errors.map(e => e.message).join(", ")}`);
+        throw new Error(
+          `Dados inválidos: ${error.errors.map((e) => e.message).join(", ")}`,
+        );
       }
 
       throw error;
@@ -296,131 +274,241 @@ export class CampaignService {
       ),
       with: {
         instance: true,
-        template: true,
+        template: true, // Buscar template completo
         campaignContacts: {
           with: {
             contact: true,
           },
-          limit: 10,
+          limit: 10, // Limitar para visualização na listagem ou detalhe
+          orderBy: asc(campaignContactsTables.createdAt),
         },
       },
     });
 
     return campaign || null;
-  }
-
-  async addContactsToCampaign(
-    campaignId: string,
-    data: {
-      contactIds?: string[];
-      groupIds?: string[];
-    },
-  ): Promise<void> {
-    const contactIds = new Set<string>();
-
-    // Adicionar contatos diretos
-    if (data.contactIds?.length) {
-      data.contactIds.forEach((id) => contactIds.add(id));
-    }
-
-    // Criar registros de campanha-contato
-    const campaignContacts = Array.from(contactIds).map((contactId) => ({
-      campaignId,
-      contactId,
-      status: "pending" as const,
-    }));
-
-    if (campaignContacts.length > 0) {
-      await db
-        .insert(campaignContactsTables)
-        .values(campaignContacts)
-        .onConflictDoNothing();
-
-      console.log(`${campaignContacts.length} registros de campanha-contato criados`);
-    }
-  }
+  } // Método para iniciar a campanha - AGORA ENFILERA A EXECUÇÃO
 
   async startCampaign(userId: string, campaignId: string): Promise<void> {
     try {
-      console.log("Iniciando campanha:", campaignId);
+      console.log(
+        `Attempting to start campaign: ${campaignId} for user ${userId}`,
+      );
 
       const campaign = await this.getCampaignById(userId, campaignId);
       if (!campaign) {
+        console.error(`Campaign ${campaignId} not found for user ${userId}`);
         throw new Error("Campanha não encontrada");
-      }
+      } // Permitir iniciar/retomar de rascunho, agendada ou pausada
 
       if (!["draft", "scheduled", "paused"].includes(campaign.status)) {
-        throw new Error("Campanha não pode ser iniciada no status atual");
-      }
+        console.warn(
+          `Attempted to start campaign ${campaignId} with status ${campaign.status}. Skipping.`,
+        );
+        return; // Não lança erro, apenas ignora se o status não permite início
+      } // Verificar se a instância está configurada e conectada
 
       if (!campaign.instanceId) {
-        throw new Error("Instância não configurada para a campanha");
+        const errorMessage = `Instância não configurada para a campanha ${campaignId}`;
+        console.error(errorMessage); // Atualizar status da campanha para falhou
+        await db
+          .update(campaignsTables)
+          .set({
+            status: "failed",
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignsTables.id, campaignId)); // Log da atividade de falha
+        await this.logActivity(userId, {
+          type: "campaign_failed",
+          status: "error",
+          title: "Campanha falhou ao iniciar",
+          description: `${errorMessage}. Campanha '${campaign.name}' marcada como falha.`,
+          campaignId: campaign.id,
+        });
+        throw new Error(errorMessage);
       }
 
-      // Verificar se a instância está conectada
       const instance = await db.query.instancesTables.findFirst({
         where: eq(instancesTables.instanceId, campaign.instanceId),
-      });
+      }); // A instância precisa estar 'open' para enviar mensagens
 
       if (!instance || instance.status !== "open") {
-        throw new Error("Instância não está conectada");
-      }
+        const errorMessage = `Instância ${campaign.instanceId} não está conectada (status: ${instance?.status || "disconnected"})`;
+        console.error(errorMessage); // Atualizar status da campanha para pausada com motivo
+        await db
+          .update(campaignsTables)
+          .set({
+            status: "paused", // Pausa a campanha se a instância não estiver pronta
+            pausedAt: new Date(), // Se houver uma coluna para motivo da pausa, salve a mensagem aqui
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignsTables.id, campaignId));
 
-      // Atualizar status da campanha
+        await this.logActivity(userId, {
+          type: "campaign_paused", // Log como pausada devido a erro na instância
+          status: "warning",
+          title: "Campanha pausada (Instância desconectada)",
+          description: `Campanha '${campaign.name}' pausada porque a instância ${campaign.instanceId} não está conectada.`,
+          campaignId: campaign.id,
+          instanceId: campaign.instanceId,
+        });
+
+        throw new Error(errorMessage); // Lança o erro para o chamador
+      } // Atualizar status da campanha para running
+
       await db
         .update(campaignsTables)
         .set({
           status: "running",
-          startedAt: new Date(),
+          startedAt: campaign.startedAt || new Date(), // Define startedAt apenas na primeira vez que vai para running
+          pausedAt: null, // Limpa pausedAt se estiver retomando
+          // Limpa cancelledAt se estiver retomando de um estado que permitia cancelamento
+          cancelledAt: null,
           updatedAt: new Date(),
         })
         .where(eq(campaignsTables.id, campaignId));
 
-      // Log da atividade
       await this.logActivity(userId, {
         type: "campaign_started",
         status: "success",
-        title: "Campanha iniciada",
-        description: `Campanha '${campaign.name}' foi iniciada`,
+        title: `Campanha ${campaign.status === "paused" ? "retomada" : "iniciada"}`,
+        description: `Campanha '${campaign.name}' foi ${campaign.status === "paused" ? "retomada" : "iniciada"}.`,
         campaignId: campaign.id,
         instanceId: campaign.instanceId,
       });
 
-      console.log("Campanha iniciada com sucesso:", campaignId);
+      console.log("Campanha status updated to running:", campaignId); // *** IMPORTANTE: Enfileirar a execução da campanha para o worker ***
+      // O worker 'executeCampaign' buscará os contatos com status 'pending' ou 'retrying'
 
+      await rabbitmq.publishMessage("campaigns", "campaign.execute", {
+        campaignId: campaign.id,
+        userId: campaign.userId,
+      });
+
+      console.log(
+        `Campaign execution message enqueued for campaign ${campaignId}.`,
+      );
     } catch (error) {
-      console.error("Erro ao iniciar campanha:", error);
+      console.error(`Erro ao iniciar campanha ${campaignId}:`, error); // Se o erro ocorreu ANTES de mudar o status para running, o status original permanece.
+      // Se ocorreu DEPOIS, o status já foi atualizado para running.
+      // Podemos adicionar lógica para marcar como falha aqui se necessário,
+      // mas re-lançar o erro para o chamador lidar é uma abordagem comum.
       throw error;
     }
-  }
+  } // Método para agendar a campanha - AGORA APENAS ATUALIZA O STATUS NO DB
 
   async scheduleCampaign(campaignId: string): Promise<void> {
-    const campaign = await db.query.campaignsTables.findFirst({
-      where: eq(campaignsTables.id, campaignId),
-    });
+    try {
+      const campaign = await db.query.campaignsTables.findFirst({
+        where: eq(campaignsTables.id, campaignId),
+      });
 
-    if (!campaign || !campaign.scheduleAt) {
-      throw new Error("Campanha ou agendamento não encontrado");
+      if (!campaign || !campaign.scheduleAt) {
+        throw new Error("Campanha ou agendamento não encontrado");
+      } // Atualizar status da campanha para 'scheduled'
+
+      await db
+        .update(campaignsTables)
+        .set({
+          status: "scheduled",
+          updatedAt: new Date(),
+        })
+        .where(eq(campaignsTables.id, campaignId));
+
+      console.log(
+        `Campanha ${campaignId} marcada como agendada para ${campaign.scheduleAt}`,
+      ); // O agendador (worker separado) irá iniciar esta campanha no horário correto chamando startCampaign.
+    } catch (error) {
+      console.error(`Erro ao agendar campanha ${campaignId}:`, error);
+      throw error;
     }
+  } // Método para pausar a campanha
 
-    const delay = campaign.scheduleAt.getTime() - Date.now();
+  async pauseCampaign(userId: string, campaignId: string): Promise<void> {
+    try {
+      const [campaign] = await db
+        .update(campaignsTables)
+        .set({
+          status: "paused",
+          pausedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(campaignsTables.id, campaignId),
+            eq(campaignsTables.userId, userId),
+            eq(campaignsTables.status, "running"), // Só pausa se estiver rodando
+          ),
+        )
+        .returning();
 
-    if (delay <= 0) {
-      // Executar imediatamente se a data já passou
-      await this.startCampaign(campaign.userId, campaignId);
-    } else {
-      // Por enquanto, apenas log - implementar com queue depois
-      console.log(`Campanha ${campaignId} agendada para ${campaign.scheduleAt}`);
+      if (!campaign) {
+        // Campanha não encontrada ou não estava no status 'running'
+        console.warn(
+          `Attempted to pause campaign ${campaignId} but it was not found or not running.`,
+        );
+        throw new Error("Campanha não encontrada ou não está em execução");
+      } // O worker verifica o status 'paused' via Redis ou DB antes de processar
+      // Sinalizar no Redis para o worker parar imediatamente (opcional, dependendo da implementação do worker)
+
+      await redis.set(
+        `campaign:paused:${campaignId}`,
+        "true",
+        "EX",
+        60 * 60 * 24,
+      ); // Expira em 24h
+
+      await this.logActivity(userId, {
+        type: "campaign_paused",
+        status: "info",
+        title: "Campanha pausada",
+        description: `Campanha '${campaign.name}' foi pausada.`,
+        campaignId: campaign.id ?? undefined,
+        instanceId: campaign.instanceId ?? undefined,
+      });
+
+      console.log("Campanha pausada:", campaignId);
+    } catch (error) {
+      console.error(`Erro ao pausar campanha ${campaignId}:`, error);
+      throw error;
+    }
+  } // Método para retomar a campanha
+
+  async resumeCampaign(userId: string, campaignId: string): Promise<void> {
+    try {
+      const campaign = await db.query.campaignsTables.findFirst({
+        where: and(
+          eq(campaignsTables.id, campaignId),
+          eq(campaignsTables.userId, userId),
+          eq(campaignsTables.status, "paused"), // Só retoma se estiver pausada
+        ),
+      });
+
+      if (!campaign) {
+        console.warn(
+          `Attempted to resume campaign ${campaignId} but it was not found or not paused.`,
+        );
+        throw new Error("Campanha não encontrada ou não está pausada");
+      } // Limpa a flag de pausa no Redis (opcional, dependendo da implementação do worker)
+
+      await redis.del(`campaign:paused:${campaignId}`); // Chama startCampaign, que vai mudar o status para running e enfileirar a execução
+
+      await this.startCampaign(userId, campaign.id); // Log da atividade é feito dentro de startCampaign
+
+      console.log("Campanha retomada:", campaignId);
+    } catch (error) {
+      console.error(`Erro ao retomar campanha ${campaignId}:`, error);
+      throw error;
     }
   }
 
   async updateCampaign(
     userId: string,
     campaignId: string,
-    data: UpdateCampaignInput
+    data: UpdateCampaignInput,
   ): Promise<Campaign> {
     try {
-      const validatedData = UpdateCampaignSchema.parse(data);
+      // TODO: Adicionar validação usando UpdateCampaignSchema.parse(data) se o schema existir
+      const validatedData = data;
 
       const [campaign] = await db
         .update(campaignsTables)
@@ -428,68 +516,80 @@ export class CampaignService {
           ...validatedData,
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(campaignsTables.id, campaignId),
-          eq(campaignsTables.userId, userId)
-        ))
+        .where(
+          and(
+            eq(campaignsTables.id, campaignId),
+            eq(campaignsTables.userId, userId),
+          ),
+        )
         .returning();
 
       if (!campaign) {
         throw new Error("Campanha não encontrada");
-      }
+      } // TODO: Adicionar lógica para re-agendar se scheduleAt for atualizado
+      // TODO: Adicionar lógica para pausar/cancelar se o status for atualizado (e.g., se mudar para 'cancelled' ou 'paused')
 
       return campaign;
     } catch (error) {
       console.error("Erro ao atualizar campanha:", error);
 
       if (error instanceof z.ZodError) {
-        throw new Error(`Dados inválidos: ${error.errors.map(e => e.message).join(", ")}`);
+        throw new Error(
+          `Dados inválidos: ${error.errors.map((e) => e.message).join(", ")}`,
+        );
       }
 
       throw error;
     }
   }
 
-  async deleteCampaign(userId: string, campaignId: string): Promise<{ success: boolean }> {
+  async deleteCampaign(
+    userId: string,
+    campaignId: string,
+  ): Promise<{ success: boolean }> {
     try {
+      // Implementando soft delete e marcando como cancelada
       const [campaign] = await db
         .update(campaignsTables)
         .set({
-          status: "cancelled",
+          status: "cancelled", // Mudar status para cancelada
+          cancelledAt: new Date(),
+          deletedAt: new Date(), // Soft delete
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(campaignsTables.id, campaignId),
-          eq(campaignsTables.userId, userId)
-        ))
+        .where(
+          and(
+            eq(campaignsTables.id, campaignId),
+            eq(campaignsTables.userId, userId),
+          ),
+        )
         .returning();
 
       if (!campaign) {
         throw new Error("Campanha não encontrada");
-      }
+      } // Opcional: Sinalizar no Redis para o worker parar imediatamente (usar a mesma flag de pausa)
+
+      await redis.set(
+        `campaign:paused:${campaignId}`,
+        "true",
+        "EX",
+        60 * 60 * 24,
+      ); // O worker também deve verificar o status 'cancelled' no DB
+      await this.logActivity(userId, {
+        type: "campaign_cancelled",
+        status: "info",
+        title: "Campanha cancelada",
+        description: `Campanha '${campaign.name}' foi cancelada.`,
+        campaignId: campaign.id,
+      });
 
       return { success: true };
     } catch (error) {
-      console.error("Erro ao deletar campanha:", error);
+      console.error("Erro ao deletar/cancelar campanha:", error);
       throw error;
     }
-  }
-
-  private async logActivity(
-    userId: string,
-    activity: {
-      type: string;
-      status: string;
-      title: string;
-      description: string;
-      campaignId?: string;
-      instanceId?: string;
-      metadata?: any;
-    },
-  ): Promise<void> {
-    // Por enquanto apenas log no console
-    console.log("Activity logged:", { userId, ...activity });
-  }
+  } // TODO: Adicionar método para obter contatos de uma campanha específica
+  // async getCampaignContacts(campaignId: string, filters: { status?: MessageStatus, limit?: number, offset?: number }) { ... }
 }
 
 export const campaignService = new CampaignService();
