@@ -15,7 +15,7 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Sua Plataforma de WhatsApp",
+  title: "WhatLead",
   description: "Plataforma de WhatsApp para empresas",
 };
 

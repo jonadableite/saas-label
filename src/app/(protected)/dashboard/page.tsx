@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 
 import { DashboardContent } from "./_components/dashboard-content";
 import { DashboardSkeleton } from "./_components/dashboard-skeleton";
+import { DatePicker } from "./_components/date-picker";
 
 export default async function DashboardPage() {
   const session = await auth.api.getSession({
@@ -18,21 +19,24 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto space-y-8 p-6">
+      <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground">
             Bem-vindo de volta, {session.user.name || session.user.email}!
           </p>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {new Date().toLocaleDateString("pt-BR", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          })}
+        <div className="flex items-center gap-4">
+          {/* <div className="text-muted-foreground hidden text-sm sm:block">
+            {new Date().toLocaleDateString("pt-BR", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
+          </div> */}
+          <DatePicker />
         </div>
       </div>
 

@@ -127,7 +127,10 @@ export function NavUser({ user, onSignOut }: NavUserProps) {
               </DropdownMenuSub>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onSignOut}>
+            <DropdownMenuItem
+              onClick={onSignOut}
+              className="text-red-500 focus:bg-red-100 focus:text-red-600 dark:text-red-400 dark:focus:bg-red-900 dark:focus:text-red-300"
+            >
               <LogOut className="mr-2 h-4 w-4" />
               Sair da conta
             </DropdownMenuItem>

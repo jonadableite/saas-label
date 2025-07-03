@@ -1,6 +1,5 @@
 // src/app/(protected)/layout.tsx
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 import { AppSidebar } from "./_components/app-sidebar";
@@ -16,7 +15,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex flex-1 items-center justify-between">
             <BreadcrumbNav />
             <div className="flex items-center gap-2">
-              <ThemeToggle />
+              {/* <ThemeToggle /> */}
             </div>
           </div>
         </header>
