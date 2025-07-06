@@ -26,7 +26,7 @@ const SuperadminPage = async () => {
   });
 
   // Verificação de autorização: Apenas usuários com a role 'superadmin' podem acessar.
-    const userRoles = session?.user?.role?. || "";
+    const userRoles = session?.user?.role || "";
   const isSuperAdmin = userRoles.split(",").includes("superadmin");
 
   if (!session || !isSuperAdmin) {
