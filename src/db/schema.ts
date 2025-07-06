@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey, // Import primaryKey for composite keys
   text,
   timestamp,
   unique,
@@ -96,6 +97,12 @@ export const importStatusEnum = pgEnum("import_status", [
   "cancelled",
 ]);
 
+export const userRoleEnum = pgEnum("user_role", [
+  "user",
+  "admin",
+  "superadmin",
+]);
+
 // ================================
 // TABELAS EXISTENTES (Mantidas e Melhoradas)
 // ================================
@@ -116,15 +123,19 @@ export const usersTables = pgTable("users_tables", {
     .notNull(),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
-  plan: text("plan").default("free").notNull(), // Definir default e notNull
+  plan: text("plan").default("FREE").notNull(),
+  role: userRoleEnum("role").default("user").notNull(),
+  banned: boolean("banned"),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires", { mode: "date" }),
 
   // Configurações do usuário
-  timezone: text("timezone").default("America/Sao_Paulo").notNull(), // Definir default e notNull
-  dailyMessageLimit: integer("daily_message_limit").default(1000).notNull(), // Definir default e notNull
+  timezone: text("timezone").default("America/Sao_Paulo").notNull(),
+  dailyMessageLimit: integer("daily_message_limit").default(1000).notNull(),
   monthlyMessageLimit: integer("monthly_message_limit")
     .default(10000)
-    .notNull(), // Definir default e notNull
-  isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
+    .notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
 
   // Estatísticas (Calculadas ou atualizadas por triggers/workers)
   totalCampaigns: integer("total_campaigns").default(0).notNull(),
@@ -148,13 +159,13 @@ export const instancesTables = pgTable(
       .references(() => usersTables.id, { onDelete: "cascade" }),
     instanceName: text("instance_name").notNull(),
     integration: text("integration").notNull().default("WHATSAPP-BAILEYS"),
-    status: text("status").default("disconnected").notNull(), // Definir default e notNull
+    status: text("status").default("disconnected").notNull(),
     ownerJid: text("owner_jid"),
     profileName: text("profile_name"),
     profilePicUrl: text("profile_pic_url"),
-    qrcode: boolean("qrcode").default(true).notNull(), // Definir default e notNull
+    qrcode: boolean("qrcode").default(true).notNull(),
     phoneNumber: text("phone_number"),
-    isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
+    isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
       .notNull(),
@@ -169,16 +180,16 @@ export const instancesTables = pgTable(
     lastMessageSentAt: timestamp("last_message_sent_at"),
     lastResetAt: timestamp("last_reset_at")
       .$defaultFn(() => new Date())
-      .notNull(), // Definir default e notNull
+      .notNull(),
 
     // Status de conexão
-    isConnected: boolean("is_connected").default(false).notNull(), // Definir default e notNull
+    isConnected: boolean("is_connected").default(false).notNull(),
     lastConnectedAt: timestamp("last_connected_at"),
     disconnectedAt: timestamp("disconnected_at"),
 
     // Configurações da instância
     webhookUrl: text("webhook_url"),
-    webhookEnabled: boolean("webhook_enabled").default(false).notNull(), // Definir default e notNull
+    webhookEnabled: boolean("webhook_enabled").default(false).notNull(),
 
     // Auditoria
     deletedAt: timestamp("deleted_at"), // Soft delete
@@ -189,6 +200,50 @@ export const instancesTables = pgTable(
     activeIdx: index("instances_active_idx").on(instances.isActive),
     phoneIdx: index("instances_phone_idx").on(instances.phoneNumber),
     deletedIdx: index("instances_deleted_idx").on(instances.deletedAt),
+  }),
+);
+
+// ================================
+// NOVAS TABELAS - TEMPLATES (Definição adicionada)
+// ================================
+
+export const templatesTables = pgTable(
+  "templates_tables",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTables.id, { onDelete: "cascade" }),
+
+    name: text("name").notNull(),
+    description: text("description"),
+    type: templateTypeEnum("type").default("text").notNull(),
+    category: text("category").default("general").notNull(),
+    content: text("content").notNull(), // Conteúdo principal do template (texto, JSON para botões/listas)
+    mediaUrl: text("media_url"), // URL para imagem, documento, vídeo, áudio, etc.
+    fileName: text("file_name"), // Nome do arquivo para documentos/mídias
+    buttons: jsonb("buttons").default([]).notNull(), // Array de botões (para templates de botão)
+    listSections: jsonb("list_sections").default([]).notNull(), // Array de seções de lista (para templates de lista)
+    variables: text("variables").array().default([]).notNull(), // Variáveis disponíveis no template (e.g., ["{{name}}", "{{company}}"])
+    requiredVariables: text("required_variables").array().default([]).notNull(), // Variáveis obrigatórias
+    tags: text("tags").array().default([]).notNull(),
+    searchKeywords: text("search_keywords"), // Campos para busca otimizada
+
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (templates) => ({
+    userIdIdx: index("templates_user_id_idx").on(templates.userId),
+    typeIdx: index("templates_type_idx").on(templates.type),
+    createdAtIdx: index("templates_created_at_idx").on(templates.createdAt),
+    deletedIdx: index("templates_deleted_idx").on(templates.deletedAt),
   }),
 );
 
@@ -374,16 +429,12 @@ export const contactsTables = pgTable(
     totalMessagesReceived: integer("total_messages_received")
       .default(0)
       .notNull(),
-    totalCampaigns: integer("total_campaigns").default(0).notNull(),
-    lastMessageAt: timestamp("last_message_at"),
-    lastCampaignAt: timestamp("last_campaign_at"),
-
-    // Pontuação de engajamento (Calculada ou atualizada por workers/triggers)
-    engagementScore: integer("engagement_score").default(0).notNull(), // 0-100
+    lastMessageSentAt: timestamp("last_message_sent_at"),
+    lastMessageReceivedAt: timestamp("last_message_received_at"),
 
     // Origem do contato
-    source: text("source"), // manual, import, api, form, etc.
-    sourceDetails: jsonb("source_details").default({}).notNull(),
+    source: text("source"), // Ex: 'manual', 'import', 'webhook'
+    sourceDetails: jsonb("source_details").default({}).notNull(), // Detalhes da origem
 
     // Auditoria
     createdAt: timestamp("created_at")
@@ -396,14 +447,12 @@ export const contactsTables = pgTable(
   },
   (contacts) => ({
     userIdIdx: index("contacts_user_id_idx").on(contacts.userId),
-    phoneIdx: index("contacts_phone_idx").on(contacts.phoneNumber),
-    nameIdx: index("contacts_name_idx").on(contacts.name),
+    phoneNumberIdx: index("contacts_phone_number_idx").on(contacts.phoneNumber),
     emailIdx: index("contacts_email_idx").on(contacts.email),
     activeIdx: index("contacts_active_idx").on(contacts.isActive),
-    validatedIdx: index("contacts_validated_idx").on(contacts.isValidated),
-    blockedIdx: index("contacts_blocked_idx").on(contacts.isBlocked),
-    deletedIdx: index("contacts_deleted_idx").on(contacts.deletedAt),
+    optedOutIdx: index("contacts_opted_out_idx").on(contacts.hasOptedOut),
     createdAtIdx: index("contacts_created_at_idx").on(contacts.createdAt),
+    deletedIdx: index("contacts_deleted_idx").on(contacts.deletedAt),
     userPhoneUnique: unique("contacts_user_phone_unique").on(
       contacts.userId,
       contacts.phoneNumber,
@@ -411,124 +460,31 @@ export const contactsTables = pgTable(
   }),
 );
 
-// Tabela de relacionamento N:N entre contatos e grupos
+// ================================
+// NOVAS TABELAS - JUNÇÃO (Many-to-Many)
+// ================================
+
 export const contactGroupMembersTables = pgTable(
   "contact_group_members_tables",
   {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
     contactId: text("contact_id")
       .notNull()
       .references(() => contactsTables.id, { onDelete: "cascade" }),
     groupId: text("group_id")
       .notNull()
       .references(() => contactGroupsTables.id, { onDelete: "cascade" }),
-
-    // Dados adicionais da associação
-    addedBy: text("added_by"), // ID do usuário que adicionou
-    isActive: boolean("is_active").default(true).notNull(), // Definir default e notNull
-
-    // Auditoria
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
       .notNull(),
-    updatedAt: timestamp("updated_at")
-      .$defaultFn(() => new Date())
-      .notNull(),
   },
-  (members) => ({
-    contactGroupUnique: unique("contact_group_unique").on(
-      members.contactId,
-      members.groupId,
+  (table) => ({
+    pk: primaryKey({ columns: [table.contactId, table.groupId] }),
+    contactIdIdx: index("contact_group_members_contact_id_idx").on(
+      table.contactId,
     ),
-    contactIdx: index("contact_group_members_contact_idx").on(
-      members.contactId,
-    ),
-    groupIdx: index("contact_group_members_group_idx").on(members.groupId),
-    activeIdx: index("contact_group_members_active_idx").on(members.isActive),
+    groupIdIdx: index("contact_group_members_group_id_idx").on(table.groupId),
   }),
 );
-
-// ================================
-// TABELAS DE TEMPLATES
-// ================================
-
-export const templatesTables = pgTable(
-  "templates_tables",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    userId: text("user_id")
-      .notNull()
-      .references(() => usersTables.id, { onDelete: "cascade" }),
-
-    // Informações do template
-    name: text("name").notNull(),
-    description: text("description"),
-    type: templateTypeEnum("type").default("text").notNull(),
-    category: text("category").default("general").notNull(), // marketing, support, notification
-
-    // Conteúdo
-    content: text("content").notNull(),
-    mediaUrl: text("media_url"), // Para imagens, vídeos, etc.
-    fileName: text("file_name"), // Nome original do arquivo
-    fileType: text("file_type"), // MIME type
-    fileSize: integer("file_size"), // Tamanho em bytes
-
-    // Para templates de lista e botões
-    buttons: jsonb("buttons"), // Configuração dos botões
-    listSections: jsonb("list_sections"), // Seções da lista
-
-    // Variáveis disponíveis no template
-    variables: text("variables").array().default([]).notNull(), // Ex: ["nome", "empresa"]
-    requiredVariables: text("required_variables").array().default([]).notNull(), // Variáveis obrigatórias
-
-    // Configurações
-    isActive: boolean("is_active").default(true).notNull(),
-    isDefault: boolean("is_default").default(false).notNull(),
-    isSystemTemplate: boolean("is_system_template").default(false).notNull(),
-
-    // Aprovação e moderação (Se aplicável, ex: WhatsApp Business API templates)
-    isApproved: boolean("is_approved").default(true).notNull(), // Assume true por padrão para integrações não-oficiais
-    approvedBy: text("approved_by"),
-    approvedAt: timestamp("approved_at"),
-    rejectionReason: text("rejection_reason"),
-
-    // Estatísticas (Calculadas ou atualizadas por workers/triggers)
-    timesUsed: integer("times_used").default(0).notNull(),
-    successRate: integer("success_rate").default(0).notNull(), // Porcentagem de sucesso (0-100)
-    avgDeliveryTime: integer("avg_delivery_time").default(0).notNull(), // Em segundos
-    lastUsedAt: timestamp("last_used_at"),
-
-    // SEO e busca
-    tags: text("tags").array().default([]).notNull(),
-    searchKeywords: text("search_keywords"),
-
-    // Auditoria
-    createdAt: timestamp("created_at")
-      .$defaultFn(() => new Date())
-      .notNull(),
-    updatedAt: timestamp("updated_at")
-      .$defaultFn(() => new Date())
-      .notNull(),
-    deletedAt: timestamp("deleted_at"),
-  },
-  (templates) => ({
-    userIdIdx: index("templates_user_id_idx").on(templates.userId),
-    typeIdx: index("templates_type_idx").on(templates.type),
-    categoryIdx: index("templates_category_idx").on(templates.category),
-    activeIdx: index("templates_active_idx").on(templates.isActive),
-    approvedIdx: index("templates_approved_idx").on(templates.isApproved),
-    deletedIdx: index("templates_deleted_idx").on(templates.deletedAt),
-    timesUsedIdx: index("templates_times_used_idx").on(templates.timesUsed),
-  }),
-);
-
-// ================================
-// TABELAS DE CAMPANHAS E CONTATOS (MENSAGENS INDIVIDUAIS)
-// ================================
 
 export const campaignContactsTables = pgTable(
   "campaign_contacts_tables",
@@ -542,45 +498,17 @@ export const campaignContactsTables = pgTable(
     contactId: text("contact_id")
       .notNull()
       .references(() => contactsTables.id, { onDelete: "cascade" }),
+    messageStatus: messageStatusEnum("message_status")
+      .default("pending")
+      .notNull(),
+    sentAt: timestamp("sent_at"),
+    deliveredAt: timestamp("delivered_at"),
+    readAt: timestamp("read_at"),
+    failedAt: timestamp("failed_at"),
+    failureReason: text("failure_reason"),
+    retries: integer("retries").default(0).notNull(),
+    externalMessageId: text("external_message_id"), // ID da mensagem na API externa (e.g., WhatsApp)
 
-    // Status do envio para este contato
-    status: messageStatusEnum("status").default("pending").notNull(),
-    priority: integer("priority").default(1).notNull(), // 1-5, 1 sendo maior prioridade
-
-    // Dados da mensagem personalizada
-    personalizedContent: text("personalized_content"), // Conteúdo com variáveis substituídas
-    variables: jsonb("variables").default({}).notNull(), // Variáveis específicas deste contato
-    mediaUrl: text("media_url"), // URL da mídia personalizada se houver
-    // Adicionar campos para tipos de template específicos se necessário (ex: buttons, list_sections)
-    buttons: jsonb("buttons"),
-    listSections: jsonb("list_sections"),
-
-    // Tentativas e erros
-    attempts: integer("attempts").default(0).notNull(),
-    maxAttempts: integer("max_attempts").default(3).notNull(),
-    lastAttemptAt: timestamp("last_attempt_at"),
-    nextAttemptAt: timestamp("next_attempt_at"), // Usado para agendar retentativas
-    errorMessage: text("error_message"),
-    errorCode: text("error_code"),
-
-    // IDs de mensagem do WhatsApp (API Externa)
-    messageId: text("message_id"), // ID da mensagem retornado pela API externa
-    remoteJid: text("remote_jid"), // JID do contato no WhatsApp (pode ser diferente do phoneNumber)
-
-    // Timestamps de status
-    queuedAt: timestamp("queued_at"), // Quando foi adicionada à fila do worker
-    processingAt: timestamp("processing_at"), // Quando o worker começou a processar
-    sentAt: timestamp("sent_at"), // Quando a API externa retornou sucesso
-    deliveredAt: timestamp("delivered_at"), // Quando o webhook de entrega foi recebido
-    readAt: timestamp("read_at"), // Quando o webhook de leitura foi recebido
-    failedAt: timestamp("failed_at"), // Quando falhou após retentativas
-    cancelledAt: timestamp("cancelled_at"), // Quando foi cancelada
-
-    // Métricas de entrega (Calculadas)
-    deliveryTime: integer("delivery_time"), // Tempo para entrega em segundos (sentAt - queuedAt) ou (deliveredAt - sentAt) dependendo da definição
-    readTime: integer("read_time"), // Tempo para leitura em segundos (readAt - deliveredAt)
-
-    // Auditoria
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
       .notNull(),
@@ -588,34 +516,23 @@ export const campaignContactsTables = pgTable(
       .$defaultFn(() => new Date())
       .notNull(),
   },
-  (campaignContacts) => ({
-    campaignIdx: index("campaign_contacts_campaign_idx").on(
-      campaignContacts.campaignId,
+  (table) => ({
+    campaignIdIdx: index("campaign_contacts_campaign_id_idx").on(
+      table.campaignId,
     ),
-    contactIdx: index("campaign_contacts_contact_idx").on(
-      campaignContacts.contactId,
+    contactIdIdx: index("campaign_contacts_contact_id_idx").on(table.contactId),
+    messageStatusIdx: index("campaign_contacts_message_status_idx").on(
+      table.messageStatus,
     ),
-    statusIdx: index("campaign_contacts_status_idx").on(
-      campaignContacts.status,
-    ),
-    priorityIdx: index("campaign_contacts_priority_idx").on(
-      campaignContacts.priority,
-    ),
-    nextAttemptIdx: index("campaign_contacts_next_attempt_idx").on(
-      campaignContacts.nextAttemptAt,
-    ),
-    messageIdIdx: index("campaign_contacts_message_id_idx").on(
-      campaignContacts.messageId,
-    ),
-    campaignContactUnique: unique("campaign_contact_unique").on(
-      campaignContacts.campaignId,
-      campaignContacts.contactId,
+    uniqueCampaignContact: unique("campaign_contacts_unique").on(
+      table.campaignId,
+      table.contactId,
     ),
   }),
 );
 
 // ================================
-// TABELAS DE ATIVIDADES
+// NOVAS TABELAS - ATIVIDADES E IMPORTS
 // ================================
 
 export const activitiesTables = pgTable(
@@ -627,14 +544,6 @@ export const activitiesTables = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => usersTables.id, { onDelete: "cascade" }),
-
-    // Informações da atividade
-    type: activityTypeEnum("type").notNull(),
-    status: activityStatusEnum("status").notNull(),
-    title: text("title").notNull(),
-    description: text("description"),
-
-    // Referências opcionais
     campaignId: text("campaign_id").references(() => campaignsTables.id, {
       onDelete: "set null",
     }),
@@ -648,29 +557,16 @@ export const activitiesTables = pgTable(
     templateId: text("template_id").references(() => templatesTables.id, {
       onDelete: "set null",
     }),
-    // Adicionar referência para campaign_contact_id se a atividade for específica de uma mensagem
     campaignContactId: text("campaign_contact_id").references(
       () => campaignContactsTables.id,
-      {
-        onDelete: "set null",
-      },
-    ),
+      { onDelete: "set null" },
+    ), // Referência à mensagem específica na campanha
 
-    // Dados adicionais
-    metadata: jsonb("metadata").default({}).notNull(), // Dados específicos da atividade
-    tags: text("tags").array().default([]).notNull(),
+    type: activityTypeEnum("type").notNull(),
+    status: activityStatusEnum("status").default("info").notNull(),
+    description: text("description").notNull(),
+    details: jsonb("details").default({}).notNull(), // Detalhes adicionais em JSON
 
-    // Impacto e importância
-    severity: text("severity").default("low").notNull(), // low, medium, high, critical
-    isRead: boolean("is_read").default(false).notNull(),
-    isArchived: boolean("is_archived").default(false).notNull(),
-
-    // Duração (para atividades que têm início e fim)
-    startedAt: timestamp("started_at"),
-    endedAt: timestamp("ended_at"),
-    duration: integer("duration"), // Em segundos
-
-    // Auditoria
     createdAt: timestamp("created_at")
       .$defaultFn(() => new Date())
       .notNull(),
@@ -679,22 +575,16 @@ export const activitiesTables = pgTable(
     userIdIdx: index("activities_user_id_idx").on(activities.userId),
     typeIdx: index("activities_type_idx").on(activities.type),
     statusIdx: index("activities_status_idx").on(activities.status),
-    severityIdx: index("activities_severity_idx").on(activities.severity),
-    readIdx: index("activities_read_idx").on(activities.isRead),
-    archivedIdx: index("activities_archived_idx").on(activities.isArchived),
     createdAtIdx: index("activities_created_at_idx").on(activities.createdAt),
-    campaignIdx: index("activities_campaign_idx").on(activities.campaignId),
-    instanceIdx: index("activities_instance_idx").on(activities.instanceId),
-    contactIdx: index("activities_contact_idx").on(activities.contactId),
-    campaignContactIdx: index("activities_campaign_contact_idx").on(
-      activities.campaignContactId,
-    ), // Novo índice
+    campaignIdIdx: index("activities_campaign_id_idx").on(
+      activities.campaignId,
+    ),
+    instanceIdIdx: index("activities_instance_id_idx").on(
+      activities.instanceId,
+    ),
+    contactIdIdx: index("activities_contact_id_idx").on(activities.contactId),
   }),
 );
-
-// ================================
-// TABELAS DE IMPORTAÇÃO
-// ================================
 
 export const contactImportsTables = pgTable(
   "contact_imports_tables",
@@ -706,19 +596,17 @@ export const contactImportsTables = pgTable(
       .notNull()
       .references(() => usersTables.id, { onDelete: "cascade" }),
 
-    // Informações da importação
     fileName: text("file_name").notNull(),
     originalFileName: text("original_file_name").notNull(),
-    fileSize: integer("file_size").notNull(),
-    fileType: text("file_type").notNull(), // csv, xlsx, etc.
-
-    // Status e progresso
+    fileSize: integer("file_size").notNull(), // Size in bytes
+    fileType: text("file_type").notNull(), // e.g., 'csv', 'xlsx'
     status: importStatusEnum("status").default("pending").notNull(),
-    totalRows: integer("total_rows").default(0).notNull(),
-    processedRows: integer("processed_rows").default(0).notNull(),
-    successfulRows: integer("successful_rows").default(0).notNull(),
-    failedRows: integer("failed_rows").default(0).notNull(),
-    skippedRows: integer("skipped_rows").default(0).notNull(),
+
+    // Estatísticas da importação
+    totalRecords: integer("total_records").default(0).notNull(),
+    processedRecords: integer("processed_records").default(0).notNull(),
+    successfulRecords: integer("successful_records").default(0).notNull(),
+    failedRecords: integer("failed_records").default(0).notNull(),
 
     // Configurações da importação
     groupIds: text("group_ids").array().default([]).notNull(), // Grupos para adicionar os contatos
@@ -766,6 +654,7 @@ export const sessionsTables = pgTable("sessions_tables", {
   userId: text("user_id")
     .notNull()
     .references(() => usersTables.id, { onDelete: "cascade" }),
+  impersonatedBy: text("impersonated_by").references(() => usersTables.id, { onDelete: "set null" }),
 });
 
 export const accountsTables = pgTable("accounts_tables", {
@@ -809,6 +698,9 @@ export const usersRelations = relations(usersTables, ({ many }) => ({
   templates: many(templatesTables),
   activities: many(activitiesTables),
   contactImports: many(contactImportsTables),
+  impersonatedSessions: many(sessionsTables, {
+    relationName: "impersonatedSession",
+  }),
 }));
 
 export const instancesRelations = relations(
@@ -901,7 +793,7 @@ export const campaignContactsRelations = relations(
       fields: [campaignContactsTables.contactId],
       references: [contactsTables.id],
     }),
-    activities: many(activitiesTables), // Adicionar relação com activities
+    activities: many(activitiesTables),
   }),
 );
 
@@ -947,6 +839,11 @@ export const sessionsRelations = relations(sessionsTables, ({ one }) => ({
   user: one(usersTables, {
     fields: [sessionsTables.userId],
     references: [usersTables.id],
+  }),
+  impersonatedByUser: one(usersTables, {
+    fields: [sessionsTables.impersonatedBy],
+    references: [usersTables.id],
+    relationName: "impersonatedSession",
   }),
 }));
 

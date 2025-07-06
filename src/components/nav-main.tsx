@@ -61,7 +61,7 @@ export function NavMain({ items }: NavMainProps) {
         transition={{ duration: 0.3, delay: 0.1 }}
       >
         <SidebarGroupLabel className="text-muted-foreground/80 text-sm font-semibold">
-          Plataforma
+          Menu Principal
         </SidebarGroupLabel>
       </motion.div>
 

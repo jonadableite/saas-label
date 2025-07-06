@@ -33,7 +33,7 @@ export function WhatsappClientPage({
         </h1>
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogTrigger asChild>
-            <Button className="flex items-center gap-2">
+            <Button variant="magic" className="flex items-center gap-2">
               <Plus className="h-4 w-4" />
               Criar Nova Instância
             </Button>

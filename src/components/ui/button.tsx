@@ -1,6 +1,6 @@
-import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
+import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -20,6 +20,14 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+        // Novo variante "magic"
+        magic:
+          "relative overflow-hidden bg-gradient-to-br from-[var(--electric)] to-[var(--deep)] text-white " +
+          "shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 ease-out " +
+          "before:absolute before:inset-0 before:-translate-x-full before:bg-[linear-gradient(to_right,transparent_0%,rgba(255,255,255,0.1)_50%,transparent_100%)] before:animate-[shimmer_2s_infinite_forwards_2s] " +
+          "after:absolute after:inset-0 after:rounded-md after:border after:border-white/20 after:opacity-0 after:transition-opacity after:duration-200 " +
+          "hover:after:opacity-100 " +
+          "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary focus-visible:ring-offset-background",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",

@@ -108,7 +108,7 @@ export function InstancesOverview({ instances }: InstancesOverviewProps) {
                 Conecte sua primeira instância do WhatsApp para começar
               </p>
               <Link href="/whatsapp">
-                <Button>
+                <Button variant="magic" >
                   <Smartphone className="mr-2 h-4 w-4" />
                   Conectar WhatsApp
                 </Button>

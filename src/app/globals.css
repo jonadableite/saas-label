@@ -85,6 +85,7 @@
 
   /* Novas cores personalizadas para modo escuro  */
   --electric: oklch(0.2564 0.0845 281.51); /* #1e1b4a */
+  --bebe: oklch(0.6298 0.1895 261.48); /* #4383fa */
   --shock: oklch(0.4847 0.1749 353.77); /* #a32166 */
   --deep: oklch(0.1591 0 0); /* #0D0D0D */
   --purple: oklch(
@@ -345,3 +346,56 @@ html {
   background: var(--scrollbar-thumb-hover);
   background-clip: content-box;
 }
+
+/* Efeito de sombra para o ícone Crown */
+.drop-shadow-glow {
+  filter: drop-shadow(0 0 8px rgba(253, 230, 138, 0.7)) drop-shadow(0 0 20px rgba(253, 230, 138, 0.5));
+}
+
+/* Shimmer effect para o botão de upgrade */
+.upgrade-button-shimmer {
+  position: relative; /* Essencial para posicionar o pseudo-elemento */
+  overflow: hidden; /* Garante que o shimmer não vaze */
+  z-index: 1; /* Garante que o conteúdo esteja acima do shimmer */
+}
+
+.upgrade-button-shimmer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%; /* Começa fora da tela à esquerda */
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%, /* Brilho branco sutil */
+    transparent 100%
+  );
+  /* Previne transição inicial e aplica animação */
+  transition: none;
+  animation: shimmer 2s infinite linear;
+  animation-delay: 2s; /* Atraso antes do primeiro shimmer */
+  pointer-events: none; /* Permite que cliques passem através do shimmer */
+  z-index: 2; /* Coloca o shimmer acima do background, mas abaixo do conteúdo real */
+}
+
+/* Ajuste do shimmer para o modo escuro */
+.dark .upgrade-button-shimmer::before {
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 50%, /* Brilho ainda mais sutil para o modo escuro */
+    transparent 100%
+  );
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%); /* Move o brilho através do botão e para fora da tela */
+  }
+}
+

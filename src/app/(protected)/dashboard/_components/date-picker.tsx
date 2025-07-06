@@ -1,6 +1,4 @@
-// src/app/(protected)/dashboard/_components/date-picker.tsx
 "use client";
-
 import { endOfMonth, format, startOfMonth, subDays, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Calendar as CalendarIcon, X as ClearIcon } from "lucide-react";
@@ -20,7 +18,6 @@ import { cn } from "@/lib/utils";
 export function DatePicker({
   className,
 }: React.HTMLAttributes<HTMLDivElement>) {
-  // Define o padrão para os últimos 30 dias
   const defaultFrom = subDays(new Date(), 30);
   const defaultTo = new Date();
 
@@ -34,7 +31,6 @@ export function DatePicker({
   );
 
   const handleDateSelect = (dateRange: DateRange | undefined) => {
-    // Atualiza os parâmetros de consulta na URL
     setFrom(dateRange?.from || null, { shallow: false });
     setTo(dateRange?.to || null, { shallow: false });
   };
@@ -61,7 +57,7 @@ export function DatePicker({
         newFrom = startOfMonth(subMonths(today, 1));
         newTo = endOfMonth(subMonths(today, 1));
         break;
-      case "allTime": // Opção para limpar ou mostrar "todo o período"
+      case "allTime":
         newFrom = null;
         newTo = null;
         break;
@@ -76,7 +72,6 @@ export function DatePicker({
     from,
     to,
   };
-
   const hasSelectedRange = from && to;
 
   return (
@@ -86,8 +81,9 @@ export function DatePicker({
           <Button
             id="date"
             variant={"outline"}
+            // Adicione 'relative' para posicionar o ícone de limpar absolutamente
             className={cn(
-              "w-[280px] justify-start text-left font-normal", // Largura fixa para consistência
+              "w-[280px] justify-start text-left font-normal relative",
               !hasSelectedRange && "text-muted-foreground",
             )}
           >
@@ -100,25 +96,25 @@ export function DatePicker({
             ) : (
               <span>Selecione um período</span>
             )}
-            {hasSelectedRange && ( // Adiciona um botão de limpar se um intervalo estiver selecionado
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-auto p-1"
+            {hasSelectedRange && (
+              // Use um span com role="button" e estilos para o ícone de limpar
+              <span
+                role="button"
+                aria-label="Limpar seleção de data"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full cursor-pointer
+                           text-muted-foreground hover:text-foreground hover:bg-accent"
                 onClick={(e) => {
                   e.stopPropagation(); // Previne que o popover abra
-                  handleQuickSelect("allTime"); // Usa "allTime" para limpar
+                  handleQuickSelect("allTime"); // Limpa a seleção
                 }}
               >
-                <ClearIcon className="text-muted-foreground hover:text-foreground h-4 w-4" />
-              </Button>
+                <ClearIcon className="h-4 w-4" />
+              </span>
             )}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="flex w-auto p-0" align="end">
           <div className="flex flex-col border-r p-2">
-            {" "}
-            {/* Opções de seleção rápida */}
             <Button
               variant="ghost"
               className="justify-start"
@@ -158,7 +154,7 @@ export function DatePicker({
           <Calendar
             initialFocus
             mode="range"
-            defaultMonth={date?.from || defaultFrom} // Usa defaultFrom se nenhuma data estiver selecionada
+            defaultMonth={date?.from || defaultFrom}
             selected={date}
             onSelect={handleDateSelect}
             numberOfMonths={2}

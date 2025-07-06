@@ -304,7 +304,7 @@ export default function TemplatesPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold">Templates</h1>
         <CreateTemplateModal onTemplateCreated={handleCreateTemplate}>
-          <Button>
+          <Button variant="magic" >
             <Plus className="mr-2 h-4 w-4" />
             Criar Novo Template
           </Button>

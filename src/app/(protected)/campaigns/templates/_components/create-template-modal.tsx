@@ -656,7 +656,7 @@ export function CreateTemplateModal() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button variant="magic" >
           <Plus className="mr-2 h-4 w-4" />
           Criar Novo Template
         </Button>
